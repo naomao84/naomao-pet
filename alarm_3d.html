@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>Ppong 3D Visual Alarm</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    html, body {
+      width: 100%; height: 100%;
+      background: transparent;
+      overflow: hidden;
+      font-family: 'Malgun Gothic', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    #canvas-container {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none;
+    }
+    .alarm-card {
+      position: absolute;
+      top: 14px; left: 16px; right: 16px; bottom: 14px;
+      background: rgba(15, 23, 42, 0.82);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1.5px solid rgba(56, 189, 248, 0.45);
+      border-radius: 28px;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7),
+                  0 0 35px rgba(56, 189, 248, 0.25),
+                  inset 0 1px 0 rgba(255, 255, 255, 0.15);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 20px 20px 20px;
+      color: #f8fafc;
+      z-index: 10;
+      pointer-events: auto;
+      animation: cardPulse 3s infinite ease-in-out;
+    }
+    @keyframes cardPulse {
+      0%, 100% { border-color: rgba(56, 189, 248, 0.45); box-shadow: 0 0 30px rgba(56, 189, 248, 0.25); }
+      50% { border-color: rgba(244, 114, 182, 0.75); box-shadow: 0 0 45px rgba(244, 114, 182, 0.4); }
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: linear-gradient(135deg, #f43f5e, #e11d48);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 4px 14px;
+      border-radius: 20px;
+      box-shadow: 0 4px 12px rgba(244, 63, 94, 0.4);
+      letter-spacing: 0.5px;
+    }
+    .alarm-title {
+      font-size: 22px;
+      font-weight: 800;
+      color: #38bdf8;
+      text-shadow: 0 0 15px rgba(56, 189, 248, 0.5);
+      margin-top: 6px;
+      text-align: center;
+      max-width: 90%;
+      line-height: 1.3;
+    }
+    .alarm-time {
+      font-size: 15px;
+      font-weight: 600;
+      color: #94a3b8;
+      margin-top: 2px;
+    }
+    .canvas-spacer {
+      flex: 1;
+      width: 100%;
+      min-height: 200px;
+    }
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      width: 100%;
+      max-width: 420px;
+      margin-top: 10px;
+    }
+    .btn {
+      flex: 1;
+      padding: 12px 18px;
+      border-radius: 14px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      color: #ffffff;
+      box-shadow: 0 8px 20px -4px rgba(2, 132, 199, 0.5);
+    }
+    .btn-primary:hover {
+      transform: translateY(-2px) scale(1.02);
+      box-shadow: 0 12px 25px -4px rgba(56, 189, 248, 0.65);
+    }
+    .btn-secondary {
+      background: rgba(51, 65, 85, 0.7);
+      color: #cbd5e1;
+      border: 1px solid rgba(148, 163, 184, 0.25);
+    }
+    .btn-secondary:hover {
+      background: rgba(71, 85, 105, 0.85);
+      color: #ffffff;
+      transform: translateY(-2px);
+    }
+  </style>
+  <script>
+    // 0. Immediate Parameter Extraction & Native Action Handlers (Zero-latency before Three.js)
+    (function() {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const l = params.get('label');
+        const t = params.get('time');
+        window.__initLabel = l ? decodeURIComponent(l) : null;
+        window.__initTime = t ? decodeURIComponent(t) : null;
+      } catch (e) {
+        console.warn('URL params error:', e);
+      }
+    })();
+
+    window.triggerDismiss = function() {
+      window.location.href = 'alarm://dismiss';
+    };
+
+    window.triggerSnooze = function() {
+      window.location.href = 'alarm://snooze';
+    };
+
+    window.setAlarmDetails = function(label, timeStr) {
+      if (label) {
+        const el = document.getElementById('alarmLabel');
+        if (el) el.textContent = label;
+      }
+      if (timeStr) {
+        const el = document.getElementById('alarmTime');
+        if (el) el.textContent = timeStr;
+      }
+    };
+
+    document.addEventListener('DOMContentLoaded', function() {
+      if (window.__initLabel) {
+        const el = document.getElementById('alarmLabel');
+        if (el) el.textContent = window.__initLabel;
+      }
+      if (window.__initTime) {
+        const el = document.getElementById('alarmTime');
+        if (el) el.textContent = window.__initTime;
+      }
+    });
+  </script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  <div class="alarm-card">
+    <div class="badge">⏰ 입체 3D 스마트 알람</div>
+    <div class="alarm-title" id="alarmLabel">회의 시간이에요!</div>
+    <div class="alarm-time" id="alarmTime">17:30:00</div>
+    <div class="canvas-spacer"></div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="triggerSnooze()">💤 5분 뒤 다시 알림</button>
+      <button class="btn btn-primary" onclick="triggerDismiss()">✨ 확인 완료</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    // 1. Audio Chime (Web Audio API Synthesizer)
+    function playAlarmChime() {
+      try {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        const ctx = new AudioContext();
+        
+        function beep(freq, start, duration) {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+          gain.gain.setValueAtTime(0, ctx.currentTime + start);
+          gain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + start + 0.04);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start(ctx.currentTime + start);
+          osc.stop(ctx.currentTime + start + duration);
+        }
+
+        // Chime sequence: High bright bell chimes
+        beep(523.25, 0.0, 0.6); // C5
+        beep(659.25, 0.15, 0.6); // E5
+        beep(783.99, 0.30, 0.7); // G5
+        beep(1046.50, 0.45, 1.2); // C6
+      } catch (e) {
+        console.warn('Audio chime error:', e);
+      }
+    }
+
+    // Play chime on load
+    setTimeout(playAlarmChime, 250);
+    setInterval(playAlarmChime, 3200);
+
+    // 2. Three.js 3D Visual Alarm Scene
+    const container = document.getElementById('canvas-container');
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(40, container.clientWidth / container.clientHeight, 0.1, 100);
+    camera.position.set(0, 0.35, 4.2);
+
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    container.appendChild(renderer.domElement);
+
+    // Lights
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
+    scene.add(ambientLight);
+
+    const dirLight = new THREE.DirectionalLight(0xfff1e6, 2.2);
+    dirLight.position.set(2, 4, 3);
+    scene.add(dirLight);
+
+    const blueRimLight = new THREE.PointLight(0x38bdf8, 3.5, 8);
+    blueRimLight.position.set(-2, 1, 2);
+    scene.add(blueRimLight);
+
+    const pinkRimLight = new THREE.PointLight(0xf472b6, 3.0, 8);
+    pinkRimLight.position.set(2, -1, 1.5);
+    scene.add(pinkRimLight);
+
+    // 3. Build 3D Metallic Alarm Clock Model
+    const clockGroup = new THREE.Group();
+    clockGroup.position.set(0, 0.05, 0);
+    scene.add(clockGroup);
+
+    // Body (Gold / Brass Cylinder)
+    const bodyGeo = new THREE.CylinderGeometry(0.78, 0.78, 0.45, 36);
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0xf59e0b,
+      metalness: 0.88,
+      roughness: 0.22,
+    });
+    const clockBody = new THREE.Mesh(bodyGeo, bodyMat);
+    clockBody.rotation.x = Math.PI / 2;
+    clockGroup.add(clockBody);
+
+    // Clock Face (White Glass with Cyan Ring)
+    const faceGeo = new THREE.CircleGeometry(0.72, 36);
+    const faceMat = new THREE.MeshBasicMaterial({ color: 0x0f172a });
+    const clockFace = new THREE.Mesh(faceGeo, faceMat);
+    clockFace.position.set(0, 0, 0.23);
+    clockGroup.add(clockFace);
+
+    const ringGeo = new THREE.RingGeometry(0.68, 0.72, 36);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+    const rimRing = new THREE.Mesh(ringGeo, ringMat);
+    rimRing.position.set(0, 0, 0.232);
+    clockGroup.add(rimRing);
+
+    // Hour/Minute Ticking Hands
+    const hourHand = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.04, 0.38),
+      new THREE.MeshBasicMaterial({ color: 0xf8fafc })
+    );
+    hourHand.geometry.translate(0, 0.19, 0);
+    hourHand.position.set(0, 0, 0.235);
+    clockGroup.add(hourHand);
+
+    const minHand = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.025, 0.52),
+      new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+    );
+    minHand.geometry.translate(0, 0.26, 0);
+    minHand.position.set(0, 0, 0.236);
+    clockGroup.add(minHand);
+
+    // Clock Center Cap
+    const capMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.07, 0.04, 16),
+      bodyMat
+    );
+    capMesh.rotation.x = Math.PI / 2;
+    capMesh.position.set(0, 0, 0.24);
+    clockGroup.add(capMesh);
+
+    // Two Top Bells
+    const bellMat = new THREE.MeshStandardMaterial({
+      color: 0xfdba74,
+      metalness: 0.92,
+      roughness: 0.18,
+    });
+    const bellGeo = new THREE.SphereGeometry(0.32, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.5);
+
+    const leftBell = new THREE.Mesh(bellGeo, bellMat);
+    leftBell.rotation.z = Math.PI * 0.72;
+    leftBell.position.set(-0.62, 0.74, 0);
+    clockGroup.add(leftBell);
+
+    const rightBell = new THREE.Mesh(bellGeo, bellMat);
+    rightBell.rotation.z = -Math.PI * 0.72;
+    rightBell.position.set(0.62, 0.74, 0);
+    clockGroup.add(rightBell);
+
+    // Striker Hammer (Vibrating back and forth!)
+    const hammerGroup = new THREE.Group();
+    hammerGroup.position.set(0, 0.65, 0);
+    const stemMesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.02, 0.02, 0.24),
+      bodyMat
+    );
+    stemMesh.geometry.translate(0, 0.12, 0);
+    hammerGroup.add(stemMesh);
+    const headMesh = new THREE.Mesh(
+      new THREE.SphereGeometry(0.055, 12, 12),
+      bodyMat
+    );
+    headMesh.position.set(0, 0.24, 0);
+    hammerGroup.add(headMesh);
+    clockGroup.add(hammerGroup);
+
+    // Two Bottom Feet
+    const footGeo = new THREE.CylinderGeometry(0.05, 0.08, 0.22, 12);
+    const leftFoot = new THREE.Mesh(footGeo, bodyMat);
+    leftFoot.position.set(-0.48, -0.80, 0);
+    leftFoot.rotation.z = 0.32;
+    clockGroup.add(leftFoot);
+
+    const rightFoot = new THREE.Mesh(footGeo, bodyMat);
+    rightFoot.position.set(0.48, -0.80, 0);
+    rightFoot.rotation.z = -0.32;
+    clockGroup.add(rightFoot);
+
+    // 4. Sonic Shockwave Wave Rings
+    const waveRings = [];
+    for (let i = 0; i < 3; i++) {
+      const wGeo = new THREE.RingGeometry(0.85, 0.92, 36);
+      const wMat = new THREE.MeshBasicMaterial({
+        color: i % 2 === 0 ? 0x38bdf8 : 0xf472b6,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide
+      });
+      const wave = new THREE.Mesh(wGeo, wMat);
+      wave.position.set(0, 0.05, 0.05);
+      scene.add(wave);
+      waveRings.push({ mesh: wave, phase: i * 0.33 });
+    }
+
+    // 5. Confetti & Stardust Particles
+    const particleCount = 60;
+    const pGeo = new THREE.BufferGeometry();
+    const pPositions = new Float32Array(particleCount * 3);
+    const pColors = new Float32Array(particleCount * 3);
+    const pVelocities = [];
+
+    const palette = [
+      new THREE.Color(0x38bdf8),
+      new THREE.Color(0xf472b6),
+      new THREE.Color(0xfde047),
+      new THREE.Color(0x4ade80),
+      new THREE.Color(0xa78bfa),
+    ];
+
+    for (let i = 0; i < particleCount; i++) {
+      pPositions[i * 3]     = (Math.random() - 0.5) * 3.6;
+      pPositions[i * 3 + 1] = (Math.random() - 0.5) * 2.8 + 0.2;
+      pPositions[i * 3 + 2] = (Math.random() - 0.5) * 1.5;
+
+      const col = palette[Math.floor(Math.random() * palette.length)];
+      pColors[i * 3]     = col.r;
+      pColors[i * 3 + 1] = col.g;
+      pColors[i * 3 + 2] = col.b;
+
+      pVelocities.push({
+        vx: (Math.random() - 0.5) * 0.4,
+        vy: -Math.random() * 0.6 - 0.2,
+        rotSpeed: (Math.random() - 0.5) * 3.0
+      });
+    }
+
+    pGeo.setAttribute('position', new THREE.BufferAttribute(pPositions, 3));
+    pGeo.setAttribute('color', new THREE.BufferAttribute(pColors, 3));
+
+    const pMat = new THREE.PointsMaterial({
+      size: 0.09,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.9,
+    });
+    const particleSystem = new THREE.Points(pGeo, pMat);
+    scene.add(particleSystem);
+
+    // 6. Animation Loop
+    let clock = new THREE.Clock();
+    function animate() {
+      requestAnimationFrame(animate);
+      const elapsed = clock.getElapsedTime();
+
+      // Striker hammer vibration (30 Hz)
+      hammerGroup.rotation.z = Math.sin(elapsed * 45.0) * 0.42;
+
+      // Clock Body slight jiggle
+      const jiggle = Math.sin(elapsed * 45.0) * 0.04;
+      clockGroup.rotation.z = jiggle;
+      clockGroup.rotation.y = Math.sin(elapsed * 1.8) * 0.22;
+
+      // Hand rotation
+      minHand.rotation.z = -elapsed * 0.8;
+      hourHand.rotation.z = -elapsed * 0.15;
+
+      // Wave rings expansion
+      waveRings.forEach(w => {
+        w.phase = (w.phase + 0.018) % 1.0;
+        const scale = 0.8 + w.phase * 1.8;
+        w.mesh.scale.set(scale, scale, 1);
+        w.mesh.material.opacity = Math.sin(w.phase * Math.PI) * 0.65;
+      });
+
+      // Particle drifting
+      const pos = pGeo.attributes.position.array;
+      for (let i = 0; i < particleCount; i++) {
+        pos[i * 3 + 1] += pVelocities[i].vy * 0.016;
+        pos[i * 3]     += pVelocities[i].vx * 0.016;
+        if (pos[i * 3 + 1] < -1.8) {
+          pos[i * 3 + 1] = 1.8;
+          pos[i * 3] = (Math.random() - 0.5) * 3.6;
+        }
+      }
+      pGeo.attributes.position.needsUpdate = true;
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    window.addEventListener('resize', () => {
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    });
+
+    // Public setters called by Python
+    window.setAlarmDetails = function(label, timeStr) {
+      if (label) document.getElementById('alarmLabel').textContent = label;
+      if (timeStr) document.getElementById('alarmTime').textContent = timeStr;
+    };
+  </script>
+</body>
+</html>
+

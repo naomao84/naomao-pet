@@ -1,0 +1,17 @@
+{
+  "scale_factor": 0.8,
+  "always_on_top": true,
+  "intermittent_gaze": true,
+  "meadow_trail": true,
+  "taskbar_gravity": true,
+  "action_frequency": "normal",
+  "enable_spider": true,
+  "enable_peek": true,
+  "enable_heist": true,
+  "enable_doodle": true,
+  "enable_superman": true,
+  "enable_pc_clean": true,
+  "llm_url": "http://localhost:8080/v1/chat/completions",
+  "llm_model": "local-model",
+  "llm_api_key": "sk-local"
+}
