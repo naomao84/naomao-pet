@@ -955,6 +955,231 @@ class ChatBarWidget(QWidget):
 
 
 # =============================================================================
+# 3.5 Screen Content Heist 2.0 Overlays (Torn Paper Hole & Stolen Piece Card)
+# =============================================================================
+class ScreenHoleOverlay(QWidget):
+    """
+    Transparent Always-On-Top desktop overlay patch displaying a realistic torn paper
+    void hole at the exact spot where desktop content was grabbed by Ppong-ppong-i.
+    """
+
+    hole_clicked = pyqtSignal()
+
+    def __init__(self, rect: QRect, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self.setGeometry(rect)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("🕳️ 도난당한 화면 조각 위치 (클릭하면 뽕뽕이에게 복구를 요청합니다)")
+
+        # Precompute deterministic torn-paper jagged perimeter
+        w = float(rect.width())
+        h = float(rect.height())
+        self._torn_poly = self._generate_torn_perimeter(w, h, teeth=14)
+        self._inner_void_poly = self._generate_torn_perimeter(w - 12.0, h - 12.0, teeth=12, offset=(6.0, 6.0))
+
+    @staticmethod
+    def _generate_torn_perimeter(w: float, h: float, teeth: int = 14, offset: tuple[float, float] = (0.0, 0.0)) -> QPolygonF:
+        ox, oy = offset
+        poly: list[QPointF] = []
+        rnd = random.Random(42)  # Deterministic seed avoids repaint flicker
+
+        # Top edge
+        for i in range(teeth + 1):
+            x = ox + (w * i) / teeth
+            y = oy + (rnd.uniform(-3.5, 3.5) if 0 < i < teeth else 0.0)
+            poly.append(QPointF(x, y))
+        # Right edge
+        for i in range(teeth + 1):
+            y = oy + (h * i) / teeth
+            x = ox + w + (rnd.uniform(-3.5, 3.5) if 0 < i < teeth else 0.0)
+            poly.append(QPointF(x, y))
+        # Bottom edge
+        for i in range(teeth + 1):
+            x = ox + w - (w * i) / teeth
+            y = oy + h + (rnd.uniform(-3.5, 3.5) if 0 < i < teeth else 0.0)
+            poly.append(QPointF(x, y))
+        # Left edge
+        for i in range(teeth + 1):
+            y = oy + h - (h * i) / teeth
+            x = ox + (rnd.uniform(-3.5, 3.5) if 0 < i < teeth else 0.0)
+            poly.append(QPointF(x, y))
+
+        return QPolygonF(poly)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.hole_clicked.emit()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # 1. Subtle ambient drop shadow under the torn border
+        painter.save()
+        painter.translate(2.0, 3.0)
+        painter.setBrush(QColor(0, 0, 0, 120))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawPolygon(self._torn_poly)
+        painter.restore()
+
+        # 2. Torn paper white/cream ragged edge fringe
+        painter.setBrush(QColor(241, 245, 249, 230))
+        painter.setPen(QPen(QColor(203, 213, 225, 200), 1.5))
+        painter.drawPolygon(self._torn_poly)
+
+        # 3. Deep void-hole inside (deep obsidian gradient #020617 to #0f172a)
+        void_grad = QLinearGradient(0, 0, 0, self.height())
+        void_grad.setColorAt(0.0, QColor("#020617"))
+        void_grad.setColorAt(1.0, QColor("#0f172a"))
+        painter.setBrush(QBrush(void_grad))
+        painter.setPen(QPen(QColor(56, 189, 248, 70), 1.0, Qt.PenStyle.DashLine))
+        painter.drawPolygon(self._inner_void_poly)
+
+        # 4. Faint futuristic cyber grid lines inside hole
+        grid_pen = QPen(QColor(56, 189, 248, 32), 1.0)
+        painter.setPen(grid_pen)
+        step_x = max(20, self.width() // 5)
+        for gx in range(step_x, self.width() - 10, step_x):
+            painter.drawLine(gx, 10, gx, self.height() - 10)
+        step_y = max(18, self.height() // 4)
+        for gy in range(step_y, self.height() - 10, step_y):
+            painter.drawLine(10, gy, self.width() - 10, gy)
+
+        # 5. Centered holographic caution warning
+        cx = self.width() // 2
+        cy = self.height() // 2
+
+        badge_w = min(170, self.width() - 20)
+        badge_h = min(46, self.height() - 20)
+        badge_rect = QRect(cx - badge_w // 2, cy - badge_h // 2, badge_w, badge_h)
+
+        painter.setBrush(QColor(2, 6, 23, 195))
+        painter.setPen(QPen(QColor("#facc15"), 1.2))
+        painter.drawRoundedRect(badge_rect, 8.0, 8.0)
+
+        painter.setFont(QFont("Malgun Gothic", 9, QFont.Weight.Bold))
+        painter.setPen(QColor("#facc15"))
+        painter.drawText(
+            QRect(badge_rect.left(), badge_rect.top() + 4, badge_w, 18),
+            Qt.AlignmentFlag.AlignCenter,
+            "⚠️ [화면 일부 도난당함!]",
+        )
+
+        painter.setFont(QFont("Malgun Gothic", 8))
+        painter.setPen(QColor("#94a3b8"))
+        painter.drawText(
+            QRect(badge_rect.left(), badge_rect.top() + 22, badge_w, 18),
+            Qt.AlignmentFlag.AlignCenter,
+            "뽕뽕이를 클릭해 복구하세요",
+        )
+        painter.end()
+
+
+class StolenPieceWidget(QWidget):
+    """
+    Floating card widget mounted on DesktopPetWindow showing the actual captured
+    desktop content snippet held in Ppong-ppong-i's hands as it runs in 2D.
+    """
+
+    clicked = pyqtSignal()
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setFixedSize(176, 116)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("🪟 뽕뽕이가 들고 있는 화면 조각! 클릭해서 되찾으세요!")
+
+        self._pixmap: Optional[QPixmap] = None
+        self._scaled_pixmap: Optional[QPixmap] = None
+        self.hide()
+
+    def set_content(self, pixmap: QPixmap) -> None:
+        self._pixmap = pixmap
+        # Scale to fit inside the 176x116 card
+        self._scaled_pixmap = pixmap.scaled(
+            164,
+            104,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self.update()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def paintEvent(self, _event) -> None:
+        if self._scaled_pixmap is None or self._scaled_pixmap.isNull():
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+
+        # Dynamic running tilt wobble (+-3.5 deg)
+        wobble_deg = math.sin(time.perf_counter() * 11.0) * 3.5
+
+        cx = self.width() / 2.0
+        cy = self.height() / 2.0
+
+        painter.save()
+        painter.translate(cx, cy)
+        painter.rotate(wobble_deg)
+        painter.translate(-cx, -cy)
+
+        card_rect = QRectF(6.0, 6.0, self.width() - 12.0, self.height() - 12.0)
+
+        # 1. Soft drop shadow
+        painter.setBrush(QColor(0, 0, 0, 110))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(card_rect.translated(2.0, 3.5), 10.0, 10.0)
+
+        # 2. Torn paper border background
+        painter.setBrush(QColor("#f8fafc"))
+        painter.setPen(QPen(QColor("#cbd5e1"), 2.0))
+        painter.drawRoundedRect(card_rect, 10.0, 10.0)
+
+        # 3. Clipped screenshot content
+        clip_path = QPainterPath()
+        clip_path.addRoundedRect(card_rect.adjusted(3.0, 3.0, -3.0, -3.0), 8.0, 8.0)
+        painter.save()
+        painter.setClipPath(clip_path)
+
+        # Center the scaled pixmap inside card
+        px = card_rect.left() + (card_rect.width() - self._scaled_pixmap.width()) / 2.0
+        py = card_rect.top() + (card_rect.height() - self._scaled_pixmap.height()) / 2.0
+        painter.drawPixmap(int(px), int(py), self._scaled_pixmap)
+        painter.restore()
+
+        # 4. Cute red holographic stamp sticker in top right
+        stamp_rect = QRectF(card_rect.right() - 64.0, card_rect.top() + 4.0, 60.0, 20.0)
+        painter.setBrush(QColor(239, 68, 68, 220))
+        painter.setPen(QPen(QColor("#ffffff"), 1.0))
+        painter.drawRoundedRect(stamp_rect, 4.0, 4.0)
+
+        painter.setFont(QFont("Malgun Gothic", 7, QFont.Weight.Bold))
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(stamp_rect, Qt.AlignmentFlag.AlignCenter, "STOLEN 🪟")
+
+        painter.restore()
+        painter.end()
+
+
+# =============================================================================
 # 4. Autonomous State Machine & Frameless Transparent Desktop Pet Window
 # =============================================================================
 class PetState(Enum):
@@ -972,6 +1197,7 @@ class PetState(Enum):
     MAGIC_DOODLE = auto()
     SUPERMAN_FLY = auto()
     SOLO_PLAY = auto()
+    EVADING = auto()
 
 
 def _create_unicorn_tray_icon() -> QIcon:
@@ -1124,6 +1350,13 @@ class DesktopPetWindow(QMainWindow):
         self._last_tick_time = time.perf_counter()
         self._last_cursor_norm = (0.0, 0.0)
 
+        # 1. Omnidirectional 2D RPG Roaming State (6.0 ~ 25.0s multi-waypoint pathing + smooth math.atan2 yaw)
+        self._roam_waypoints: list[tuple[float, float]] = []
+        self._roam_start_time = 0.0
+        self._roam_duration = 0.0
+        self._roam_mode = "walk"
+        self._current_stage_yaw = 0.0
+
         # Character scaling factor (0.30x ~ 1.80x, grounded on taskbar)
         self._scale_factor = self._prefs.scale_factor
 
@@ -1142,7 +1375,7 @@ class DesktopPetWindow(QMainWindow):
         self._last_user_activity_time = time.perf_counter()
         self._is_napping = False
 
-        # Special Active Actions Tracking State (Spider-Man, Peek, Heist, Doodle, Superman)
+        # Special Active Actions Tracking State (Spider-Man, Peek, Heist, Doodle, Superman, Evasion)
         self._spider_t = 0.0
         self._spider_dir = 1.0
         self._spider_start_x = 0.0
@@ -1157,11 +1390,33 @@ class DesktopPetWindow(QMainWindow):
         self._doodle_progress = 0.0
         self._doodle_timer = 0.0
         self._doodle_proud_triggered = False
+
+        # 2. Extended Superhero Flight State (8.0 ~ 25.0s multi-wave swoops)
         self._superman_progress = 0.0
         self._superman_start_x = 0.0
         self._superman_target_x = 0.0
+        self._superman_start_y = 0.0
         self._superman_floor_y = 0.0
+        self._superman_duration = 0.0
+        self._superman_start_time = 0.0
+        self._superman_waves = 3
+        self._superman_mode = 0
         self._last_gaze_weight = -1.0
+
+        # 3. 3-Mode Mouse Evasion AI State (Velocity escape, Distance escape, Taunt fleeing)
+        self._evasion_mode = "velocity"
+        self._evasion_start_time = 0.0
+        self._evasion_duration = 0.0
+        self._evasion_target_x = 0.0
+        self._evasion_target_y = 0.0
+        self._last_taunt_time = 0.0
+        self._last_evasion_trigger_time = 0.0
+
+        # 4. Screen Content Heist 2.0 State with ScreenHoleOverlay & StolenPieceWidget
+        self._screen_hole_overlay: Optional[ScreenHoleOverlay] = None
+        self._heist_waypoints: list[tuple[float, float]] = []
+        self._heist_start_time = 0.0
+        self._heist_duration = 0.0
 
         self._init_window_flags()
         self._init_widgets()
@@ -1211,6 +1466,11 @@ class DesktopPetWindow(QMainWindow):
         self.speech_bubble = SpeechBubbleWidget(central)
         self.speech_bubble.raise_()
 
+        # 2.5 Screen Content Heist 2.0 Stolen Piece Card mounted on character hands
+        self.stolen_piece_widget = StolenPieceWidget(central)
+        self.stolen_piece_widget.move((self.WINDOW_W - 176) // 2, 205)
+        self.stolen_piece_widget.clicked.connect(lambda: self.restore_screen_heist(caught_by_user=True))
+
         # 3. Top-Level Executive AI Chat & History Drawer (Floats on top, zero occlusion by 3D canvas)
         self.chat_window = FloatingChatWindow()
         self.chat_bar = self.chat_window  # Backward-compatible alias for visibility/busy checks
@@ -1258,13 +1518,21 @@ class DesktopPetWindow(QMainWindow):
         peek_shortcut.activated.connect(self.start_hide_and_seek)
 
         heist_shortcut = QShortcut(QKeySequence("Ctrl+3"), self)
-        heist_shortcut.activated.connect(self.start_window_heist)
+        heist_shortcut.activated.connect(self.start_screen_content_heist)
 
         doodle_shortcut = QShortcut(QKeySequence("Ctrl+4"), self)
         doodle_shortcut.activated.connect(lambda: self.start_magic_doodle())
 
         super_shortcut = QShortcut(QKeySequence("Ctrl+5"), self)
         super_shortcut.activated.connect(self.start_superman_fly)
+
+        # Hotkey Ctrl+8 for 3-Mode Mouse Evasion AI
+        evasion_shortcut = QShortcut(QKeySequence("Ctrl+8"), self)
+        evasion_shortcut.activated.connect(lambda: self.start_mouse_evasion(mode="velocity"))
+
+        # Hotkey Ctrl+9 for Omnidirectional 2D Desktop RPG Roaming
+        roam_shortcut = QShortcut(QKeySequence("Ctrl+9"), self)
+        roam_shortcut.activated.connect(lambda: self.start_omnidirectional_roam(mode="walk"))
 
         # Smart 3D Visual Alarm Manager
         self.alarm_manager = AlarmManager(self)
@@ -1292,6 +1560,15 @@ class DesktopPetWindow(QMainWindow):
         self._roam_tick_timer.setInterval(16)
         self._roam_tick_timer.timeout.connect(self._on_roam_tick)
         self._roam_tick_timer.start()
+
+        # Screen Heist 2.0 Dual Restoration Timers (10~15s auto + 25s failsafe)
+        self._heist_restore_timer = QTimer(self)
+        self._heist_restore_timer.setSingleShot(True)
+        self._heist_restore_timer.timeout.connect(lambda: self.restore_screen_heist(caught_by_user=False))
+
+        self._heist_max_timeout_timer = QTimer(self)
+        self._heist_max_timeout_timer.setSingleShot(True)
+        self._heist_max_timeout_timer.timeout.connect(lambda: self.restore_screen_heist(caught_by_user=False))
 
         # Active "Bout-and-Pause" autonomous FSM decision timer (1.8s - 3.6s lively cadence)
         self._decision_timer = QTimer(self)
@@ -1425,25 +1702,31 @@ class DesktopPetWindow(QMainWindow):
             act_a.triggered.connect(lambda _checked, a=act_name, d=d_ms: self.trigger_3d_action(a, duration_ms=d))
             action_menu.addAction(act_a)
 
-        # 4. Special Active Actions Submenu (Spider-Man, Hide&Seek, Heist, Doodle, Superman)
+        # 4. Special Active Actions Submenu (Spider-Man, Hide&Seek, Heist, Doodle, Superman, Evasion, Roam)
         special_menu = QMenu("Special Active Actions (특수 활동 액션 🎮)", menu)
         special_menu.setStyleSheet(menu.styleSheet())
         act_spider = QAction("🕷️ Spider-Ppong Web Swing (스파이더맨 스윙 / Ctrl+1)", self)
         act_spider.triggered.connect(self.start_spider_swing)
         act_hide = QAction("🙈 Hide-and-Seek & Peek (숨바꼭질 & 빼꼼 / Ctrl+2)", self)
         act_hide.triggered.connect(self.start_hide_and_seek)
-        act_heist = QAction("🪟 Window Heist Prank (창 들고 도망가기 / Ctrl+3)", self)
-        act_heist.triggered.connect(self.start_window_heist)
+        act_heist = QAction("🪟 Screen Content Heist 2.0 (화면 훔치기 & 구멍 오버레이 / Ctrl+3)", self)
+        act_heist.triggered.connect(self.start_screen_content_heist)
         act_doodle = QAction("🎨 Magic Rainbow Doodle (바탕화면 낙서 / Ctrl+4)", self)
         act_doodle.triggered.connect(lambda: self.start_magic_doodle())
-        act_super = QAction("🚀 Superhero Flight (슈퍼맨 비행 / Ctrl+5)", self)
-        act_super.triggered.connect(self.start_superman_fly)
+        act_super = QAction("🚀 Superhero Flight (슈퍼맨 8~25초 비행 / Ctrl+5)", self)
+        act_super.triggered.connect(lambda: self.start_superman_fly())
+        act_evasion = QAction("🏃‍♂️ Mouse Evasion AI (3모드 술래잡기 & 회피 AI / Ctrl+8)", self)
+        act_evasion.triggered.connect(lambda: self.start_mouse_evasion(mode="velocity"))
+        act_roam = QAction("🗺️ Omnidirectional 2D RPG Roaming (전방위 2D 모험 / Ctrl+9)", self)
+        act_roam.triggered.connect(lambda: self.start_omnidirectional_roam(mode="walk"))
 
         special_menu.addAction(act_spider)
         special_menu.addAction(act_hide)
         special_menu.addAction(act_heist)
         special_menu.addAction(act_doodle)
         special_menu.addAction(act_super)
+        special_menu.addAction(act_evasion)
+        special_menu.addAction(act_roam)
 
         # 4.5. Solo Play Activities Submenu (30 Diverse Solo Activities)
         solo_menu = QMenu("Solo Play Activities (혼자 놀기 30종 🎪)", menu)
@@ -1968,6 +2251,25 @@ class DesktopPetWindow(QMainWindow):
                 f"window.updateCursorTarget({nx:.3f}, {ny:.3f});"
             )
 
+        # Mode 1: Fast Velocity Escape Trigger in IDLE / WALK / RUN
+        if (
+            not self.is_action_busy()
+            and self._state in {PetState.IDLE, PetState.WALK, PetState.RUN}
+            and not self.chat_bar.isVisible()
+            and (now - getattr(self, "_last_evasion_trigger_time", 0.0)) > 5.5
+        ):
+            pet_c = self.frameGeometry().center()
+            to_pet_x = float(pet_c.x() - cursor.x())
+            to_pet_y = float(pet_c.y() - cursor.y())
+            dist_to_pet = math.hypot(to_pet_x, to_pet_y)
+            step_x = float(cursor.x() - self._last_cursor_global.x())
+            step_y = float(cursor.y() - self._last_cursor_global.y())
+            approach_dot = step_x * to_pet_x + step_y * to_pet_y
+
+            if self._cursor_speed_px > 680.0 and dist_to_pet < 340.0 and approach_dot > 0:
+                self.start_mouse_evasion(mode="velocity")
+                return
+
         # Skip tactile hover detectors while dragging, falling, or awaiting LLM
         llm_busy = self._active_worker is not None and self._active_worker.isRunning()
         if self._is_dragging or self._left_pressed or self._state == PetState.FALLING or llm_busy:
@@ -2069,16 +2371,34 @@ class DesktopPetWindow(QMainWindow):
 
     def cancel_all_active_actions(self) -> None:
         """Cleanly stops and resets any currently running active action or solo activity, ensuring strict mutex."""
+        if hasattr(self, "_heist_restore_timer"):
+            self._heist_restore_timer.stop()
+        if hasattr(self, "_heist_max_timeout_timer"):
+            self._heist_max_timeout_timer.stop()
+        if getattr(self, "_screen_hole_overlay", None) is not None:
+            try:
+                self._screen_hole_overlay.close()
+            except Exception:
+                pass
+            self._screen_hole_overlay = None
+        if hasattr(self, "stolen_piece_widget"):
+            self.stolen_piece_widget.hide()
+
         self._run_js(
             "if (typeof window.setSpiderSwingState === 'function') window.setSpiderSwingState(false); "
             "if (typeof window.setWindowHeistState === 'function') window.setWindowHeistState(false); "
             "if (typeof window.setPeekState === 'function') window.setPeekState(false); "
             "if (typeof window.setMagicDoodleState === 'function') window.setMagicDoodleState(false); "
             "if (typeof window.setSupermanFlyState === 'function') window.setSupermanFlyState(false); "
+            "if (typeof window.setStageYawOverride === 'function') window.setStageYawOverride(null); "
             "if (typeof window.stopSoloAction === 'function') window.stopSoloAction();"
         )
+        self._current_stage_yaw = 0.0
         self._doodle_proud_triggered = False
         self._spider_current_swing = 1
+        self._roam_waypoints.clear()
+        self._roam_duration = 0.0
+        self._heist_waypoints.clear()
         if self._active_worker is not None and self._active_worker.isRunning():
             try:
                 self._active_worker.terminate()
@@ -2107,6 +2427,7 @@ class DesktopPetWindow(QMainWindow):
                 PetState.FALLING,
                 PetState.PETTING,
                 PetState.INTERACTING,
+                PetState.EVADING,
             }
             or (hasattr(self, "chat_window") and self.chat_window.isVisible())
             or (self._active_worker is not None and self._active_worker.isRunning())
@@ -2145,11 +2466,14 @@ class DesktopPetWindow(QMainWindow):
                 if self._prefs.enable_peek:
                     candidates.append(self.start_hide_and_seek)
                 if self._prefs.enable_heist and roam_span > 240:
-                    candidates.append(self.start_window_heist)
+                    candidates.append(self.start_screen_content_heist)
                 if self._prefs.enable_doodle:
                     candidates.append(self.start_magic_doodle)
                 if self._prefs.enable_superman and roam_span > 260:
                     candidates.append(self.start_superman_fly)
+                # 18% chance to trigger Mouse Evasion AI tag game autonomously
+                if random.random() < 0.18:
+                    candidates.append(lambda: self.start_mouse_evasion(mode="taunt"))
 
                 if candidates:
                     chosen = random.choice(candidates)
@@ -2157,21 +2481,11 @@ class DesktopPetWindow(QMainWindow):
                     return
 
         if roam_span > 140 and roll < 0.52:
-            # 1. Brisk cute waddle Walk (capped 130 - 340 px bout!)
-            self._walk_target_x = self._pick_bounded_target_x(min_x, max_x, 130.0, 340.0)
-            direction = 1 if self._walk_target_x >= self._pos_x else -1
-            self._state = PetState.WALK
-            self._last_tick_time = time.perf_counter()
-            self._set_3d_facing(direction)
-            self.trigger_3d_action("Walk")
+            # 1. Omnidirectional 2D Desktop RPG Roam: Cute waddle Walk (6.0 ~ 25.0s multi-waypoint pathing)
+            self.start_omnidirectional_roam(mode="walk")
         elif roam_span > 240 and roll < 0.74:
-            # 2. Energetic scamper Run (capped 260 - 560 px bout!)
-            self._walk_target_x = self._pick_bounded_target_x(min_x, max_x, 260.0, 560.0)
-            direction = 1 if self._walk_target_x >= self._pos_x else -1
-            self._state = PetState.RUN
-            self._last_tick_time = time.perf_counter()
-            self._set_3d_facing(direction)
-            self.trigger_3d_action("Run")
+            # 2. Omnidirectional 2D Desktop RPG Roam: Energetic scamper Run (6.0 ~ 25.0s multi-waypoint pathing)
+            self.start_omnidirectional_roam(mode="run")
         elif roll < 0.92:
             # 3. Playful in-place game character expression or solo activity!
             self._state = PetState.IDLE
@@ -2276,24 +2590,215 @@ class DesktopPetWindow(QMainWindow):
         self._schedule_next_decision(12000, 16000)
 
     def start_window_heist(self) -> None:
-        """Playfully holds a holographic desktop window overhead and sprints across screen!"""
+        """Backward-compatible alias for Screen Content Heist 2.0."""
+        self.start_screen_content_heist()
+
+    def start_screen_content_heist(self) -> None:
+        """
+        4. Screen Content Heist 2.0 with ScreenHoleOverlay:
+           - Capturing desktop content via QGuiApplication.primaryScreen().grabWindow
+           - Displaying a realistic torn hole / erased overlay patch at original spot
+           - Pet holding the stolen content piece and running in 2D
+           - Dual restoration: automatic after 10~15s, or immediate on mouse catch/click, with max 25s timeout.
+        """
         if self._is_dragging or self._left_pressed:
             return
         self.cancel_all_active_actions()
         self._decision_timer.stop()
-        avail = self._current_available_geometry()
-        mid_x = (avail.left() + avail.right() - self.WINDOW_W) / 2.0
-        self._heist_dir = 1.0 if self._pos_x < mid_x else -1.0
-        self._heist_progress = 0.0
-        self._state = PetState.WINDOW_HEIST
-        self._set_3d_facing(int(self._heist_dir))
-        self.trigger_3d_action("Run")
 
-        title = self._get_active_window_title()
-        self._heist_title = title
-        safe_title = title.replace("'", "\\'").replace('"', '\\"')
-        self._run_js(f"typeof window.setWindowHeistState === 'function' && window.setWindowHeistState(true, '{safe_title} 🪟');")
-        self.speech_bubble.show_message(f"헤헤! [{title}] 창은 뽕뽕이가 접수했다~! 잡아봐라~!! 🪟💨", duration_ms=3500)
+        screen = QGuiApplication.primaryScreen()
+        avail = self._current_available_geometry()
+
+        gw, gh = 200, 135
+        # Pick capture location near pet on desktop
+        gx = max(avail.left() + 40, min(avail.right() - gw - 40, int(self._pos_x + (self.WINDOW_W - gw) // 2)))
+        gy = max(avail.top() + 60, min(avail.bottom() - gh - 80, int(self._pos_y + 140)))
+        grab_rect = QRect(gx, gy, gw, gh)
+
+        # 1. Grab actual screen content
+        captured_pixmap = screen.grabWindow(0, gx, gy, gw, gh)
+
+        # 2. Display realistic torn-paper void hole overlay patch
+        if self._screen_hole_overlay is not None:
+            try:
+                self._screen_hole_overlay.close()
+            except Exception:
+                pass
+            self._screen_hole_overlay = None
+
+        self._screen_hole_overlay = ScreenHoleOverlay(grab_rect)
+        self._screen_hole_overlay.hole_clicked.connect(lambda: self.restore_screen_heist(caught_by_user=True))
+        self._screen_hole_overlay.show()
+
+        # 3. Mount stolen content piece card on pet's hands
+        self.stolen_piece_widget.set_content(captured_pixmap)
+        self.stolen_piece_widget.show()
+        self.stolen_piece_widget.raise_()
+
+        self._state = PetState.WINDOW_HEIST
+        self._heist_progress = 0.0
+        self._heist_start_time = time.perf_counter()
+        self._heist_duration = random.uniform(10.0, 15.0)
+
+        # 4. Generate 2D multi-waypoint path for running with the stolen content
+        self._heist_waypoints = self._generate_2d_desktop_waypoints(random.randint(4, 7))
+
+        self.trigger_3d_action("Run", emotion="excited")
+        self._run_js("typeof window.setWindowHeistState === 'function' && window.setWindowHeistState(true, '화면 조각 🪟');")
+        self.speech_bubble.show_message("헤헤! 바탕화면 한 조각 훔쳤다~! 잡아봐라~!! 🪟💨", duration_ms=3500)
+
+        # Dual restoration: auto timer (10~15s) and max failsafe timeout (25s)
+        self._heist_restore_timer.start(int(self._heist_duration * 1000))
+        self._heist_max_timeout_timer.start(25000)
+
+    def restore_screen_heist(self, caught_by_user: bool = False, quiet: bool = False) -> None:
+        """Restores screen content gracefully: closes hole overlay, hides piece card, returns to IDLE."""
+        self._heist_restore_timer.stop()
+        self._heist_max_timeout_timer.stop()
+
+        if self._screen_hole_overlay is not None:
+            try:
+                self._screen_hole_overlay.close()
+            except Exception:
+                pass
+            self._screen_hole_overlay = None
+
+        if hasattr(self, "stolen_piece_widget"):
+            self.stolen_piece_widget.hide()
+
+        self._run_js("typeof window.setWindowHeistState === 'function' && window.setWindowHeistState(false);")
+        self._run_js("typeof window.setStageYawOverride === 'function' && window.setStageYawOverride(null);")
+        self._current_stage_yaw = 0.0
+        self._set_3d_facing(0)
+
+        if not quiet:
+            if caught_by_user:
+                self.trigger_3d_action("Shy", emotion="shy")
+                self.speech_bubble.show_message("앗 들켰다! 헤헤 장난이었어요~ 원래대로 찰칵 붙여둘게요! 🩹💖", duration_ms=3500)
+            else:
+                self.trigger_3d_action("HappySpin", emotion="proud")
+                self.speech_bubble.show_message("히히 실컷 구경했으니 다시 제자리에 쏙! 복구 완료! ✨", duration_ms=3500)
+
+        self._state = PetState.IDLE
+        self._schedule_next_decision(2200, 4200)
+
+    def _generate_2d_desktop_waypoints(self, count: int = 4) -> list[tuple[float, float]]:
+        """Generates random 2D waypoints spanning full desktop bounds (min_x..max_x, min_y..max_y)."""
+        avail = self._current_available_geometry()
+        min_x = float(avail.left() + 20)
+        max_x = float(max(avail.left() + 30, avail.right() - self.WINDOW_W - 20))
+        min_y = float(avail.top() + 30)
+        max_y = float(self._taskbar_floor_y(avail))
+
+        pts: list[tuple[float, float]] = []
+        curr_x, curr_y = self._pos_x, self._pos_y
+        for _ in range(count):
+            cand_x, cand_y = curr_x, curr_y
+            for _attempt in range(12):
+                cand_x = random.uniform(min_x, max_x)
+                cand_y = random.uniform(min_y, max_y)
+                if math.hypot(cand_x - curr_x, cand_y - curr_y) >= 150.0:
+                    break
+            pts.append((cand_x, cand_y))
+            curr_x, curr_y = cand_x, cand_y
+        return pts
+
+    def start_omnidirectional_roam(self, mode: str = "walk", duration: Optional[float] = None) -> None:
+        """
+        1. Omnidirectional 2D Desktop RPG Roaming:
+           - Walk and Run across full desktop (min_x to max_x, min_y to max_y)
+           - Multi-waypoint pathing with duration randomized between 6.0 and 25.0 seconds
+           - Smooth 3D yaw calculation using math.atan2 so character turns towards travel direction
+        """
+        if self._is_dragging or self._left_pressed:
+            return
+        if self.is_action_busy():
+            return
+        self.cancel_all_active_actions()
+        self._decision_timer.stop()
+
+        self._roam_duration = duration if duration is not None else random.uniform(6.0, 25.0)
+        self._roam_start_time = time.perf_counter()
+        self._roam_mode = mode
+        self._state = PetState.RUN if mode == "run" else PetState.WALK
+
+        self._roam_waypoints = self._generate_2d_desktop_waypoints(random.randint(3, 6))
+        self.trigger_3d_action("Run" if mode == "run" else "Walk")
+
+    def _finish_omnidirectional_roam(self) -> None:
+        self._roam_waypoints.clear()
+        self._roam_duration = 0.0
+        was_running = (self._state == PetState.RUN)
+        self._state = PetState.IDLE
+        self._set_3d_facing(0)
+        self._run_js("typeof window.setStageYawOverride === 'function' && window.setStageYawOverride(null);")
+        self._current_stage_yaw = 0.0
+
+        if random.random() < 0.45:
+            arrival_act = "HappySpin" if (was_running and random.random() < 0.5) else random.choice(["Curious", "Wave", "Stretch"])
+            self.trigger_3d_action(arrival_act)
+            self._schedule_next_decision(2200, 3800)
+        else:
+            self.trigger_3d_action("Idle")
+            self._schedule_next_decision(1800, 3400)
+
+    def start_mouse_evasion(self, mode: str = "velocity", custom_taunt: Optional[str] = None) -> None:
+        """
+        3. 3-Mode Mouse Evasion AI:
+           - Fast velocity escape (smart dodge away from high-speed cursor approach)
+           - Distance escape (maintaining radial buffer zone)
+           - Fleeing with taunt emotes ("잡아봐라~", "메롱!")
+        """
+        if self._is_dragging or self._left_pressed:
+            return
+        if self.is_action_busy() and self._state != PetState.EVADING:
+            return
+        self.cancel_all_active_actions()
+        self._decision_timer.stop()
+
+        self._evasion_mode = mode
+        self._state = PetState.EVADING
+        self._evasion_start_time = time.perf_counter()
+        self._evasion_duration = random.uniform(12.0, 18.0)
+        self._last_taunt_time = time.perf_counter()
+        self._last_evasion_trigger_time = time.perf_counter()
+
+        cursor = QCursor.pos()
+        pet_c = self.frameGeometry().center()
+        dx = float(pet_c.x() - cursor.x())
+        dy = float(pet_c.y() - cursor.y())
+        dist = max(1.0, math.hypot(dx, dy))
+        escape_dist = random.uniform(320.0, 520.0)
+
+        avail = self._current_available_geometry()
+        min_x = float(avail.left() + 20)
+        max_x = float(avail.right() - self.WINDOW_W - 20)
+        min_y = float(avail.top() + 30)
+        max_y = float(self._taskbar_floor_y(avail))
+
+        self._evasion_target_x = max(min_x, min(max_x, self._pos_x + (dx / dist) * escape_dist))
+        self._evasion_target_y = max(min_y, min(max_y, self._pos_y + (dy / dist) * escape_dist))
+
+        self.trigger_3d_action("Run", emotion="excited")
+        taunt = custom_taunt or (
+            "으악! 엄청 빠르다! 도망쳐~! ⚡💨" if mode == "velocity" else "잡아봐라~ 💨 못 잡겠지롱! 😝"
+        )
+        self.speech_bubble.show_message(taunt, duration_ms=2500)
+
+    def _finish_mouse_evasion(self, caught: bool) -> None:
+        self._state = PetState.IDLE
+        self._set_3d_facing(0)
+        self._run_js("typeof window.setStageYawOverride === 'function' && window.setStageYawOverride(null);")
+        self._current_stage_yaw = 0.0
+
+        if caught:
+            self.trigger_3d_action("HappySpin", emotion="surprised")
+            self.speech_bubble.show_message("앗! 잡혔다~ 항복 항복! 🏳️😆 역시 엄청 빠르시네요!", duration_ms=3500)
+        else:
+            self.trigger_3d_action("Proud", emotion="proud")
+            self.speech_bubble.show_message("휴우~ 내가 이겼다! 뽕뽕이의 완승! 🏆😎", duration_ms=3500)
+
+        self._schedule_next_decision(2400, 4200)
 
     def start_magic_doodle(self, shape: Optional[str] = None) -> None:
         """Draws glowing grand neon graffiti (heart, star, smiley) reaching across the screen center!"""
@@ -2311,8 +2816,11 @@ class DesktopPetWindow(QMainWindow):
         self.trigger_3d_action("Dance")
         self.speech_bubble.show_message(f"바탕화면 한가운데에 대형 마법 {self._doodle_shape} 그리는 중... 🎨✨", duration_ms=2800)
 
-    def start_superman_fly(self) -> None:
-        """Launches into the sky: acrobatic wave flight, mouse cursor kidnap prank, or folder snatch!"""
+    def start_superman_fly(self, duration: Optional[float] = None) -> None:
+        """
+        2. Superhero Flight:
+           Extended duration randomized between 8.0 and 25.0 seconds with multi-wave swoops across desktop.
+        """
         if self._is_dragging or self._left_pressed:
             return
         self.cancel_all_active_actions()
@@ -2321,25 +2829,31 @@ class DesktopPetWindow(QMainWindow):
         floor_y = self._taskbar_floor_y(avail)
         self._superman_floor_y = floor_y
         self._superman_start_x = self._pos_x
-        mid_x = (avail.left() + avail.right() - self.WINDOW_W) / 2.0
-        self._superman_dir = 1.0 if self._pos_x < mid_x else -1.0
-        flight_span = random.uniform(450.0, 750.0)
-        self._superman_target_x = max(
-            float(avail.left() + 40),
-            min(float(avail.right() - self.WINDOW_W - 40), self._pos_x + self._superman_dir * flight_span),
-        )
+        self._superman_start_y = self._pos_y
+        self._superman_duration = duration if duration is not None else random.uniform(8.0, 25.0)
+        self._superman_start_time = time.perf_counter()
         self._superman_progress = 0.0
+        self._superman_waves = max(2, int(self._superman_duration / 3.8))
         self._superman_mode = random.choice([0, 1, 2])
         self._state = PetState.SUPERMAN_FLY
+
+        mid_x = (avail.left() + avail.right() - self.WINDOW_W) / 2.0
+        self._superman_dir = 1.0 if self._pos_x < mid_x else -1.0
         self._set_3d_facing(int(self._superman_dir))
         self.trigger_3d_action("WaveJump")
-        self._run_js(f"typeof window.setSupermanFlyState === 'function' && window.setSupermanFlyState(true, 0, {self._superman_mode});")
+        self._run_js(
+            f"typeof window.setSupermanFlyState === 'function' && "
+            f"window.setSupermanFlyState(true, 0, {self._superman_mode});"
+        )
         if self._superman_mode == 1:
-            self.speech_bubble.show_message("쓩~! 🚀 마우스 포인터 낚아채서 하늘로 도망간다~!! 🖱️✨", duration_ms=3200)
+            self.speech_bubble.show_message("쓩~! 🚀 마우스 포인터 낚아채서 성층권으로 비행한다~!! 🖱️✨", duration_ms=3200)
         elif self._superman_mode == 2:
-            self.speech_bubble.show_message("쓩~! 🚀 중요 서류 파일 들고 성층권으로 날아간다~!! 📁💨", duration_ms=3200)
+            self.speech_bubble.show_message("쓩~! 🚀 중요 서류 파일 들고 초고속 비행 출발~!! 📁💨", duration_ms=3200)
         else:
-            self.speech_bubble.show_message("슈퍼맨 뽕뽕이 출동! 🚀 하늘에 무지개 궤적을 그리며 다방향 비행 중!", duration_ms=3200)
+            self.speech_bubble.show_message(
+                f"슈퍼맨 뽕뽕이 출동! 🚀 {int(self._superman_duration)}초 동안 전방위 무지개 비행 시작!",
+                duration_ms=3200,
+            )
 
     def _on_roam_tick(self) -> None:
         now = time.perf_counter()
@@ -2381,31 +2895,122 @@ class DesktopPetWindow(QMainWindow):
             self._set_3d_falling_state(True, norm_vy)
             return
 
-        # 2. Horizontal Zero-Slip Walk / Run Locomotion
+        # 2. Omnidirectional 2D Desktop RPG Roam (Walk / Run across full desktop)
         if self._state in {PetState.WALK, PetState.RUN} and not self.chat_bar.isVisible():
-            was_running = self._state == PetState.RUN
-            speed = self._run_speed if was_running else self._walk_speed
-            diff = self._walk_target_x - self._pos_x
+            if self._roam_duration > 0 and (now - self._roam_start_time >= self._roam_duration):
+                self._finish_omnidirectional_roam()
+                return
+
+            if not self._roam_waypoints:
+                if self._roam_duration > 0 and (now - self._roam_start_time < self._roam_duration):
+                    self._roam_waypoints = self._generate_2d_desktop_waypoints(random.randint(2, 4))
+                else:
+                    self._finish_omnidirectional_roam()
+                    return
+
+            target_x, target_y = self._roam_waypoints[0]
+            dx = target_x - self._pos_x
+            dy = target_y - self._pos_y
+            dist = math.hypot(dx, dy)
+            speed = self._run_speed if self._state == PetState.RUN else self._walk_speed
             step = speed * dt
 
-            if abs(diff) <= step:
-                self._pos_x = self._walk_target_x
+            if dist <= max(step, 8.0):
+                self._pos_x = target_x
+                self._pos_y = target_y
                 self._update_window_pos()
-                self._state = PetState.IDLE
-                self._set_3d_facing(0)
+                self._roam_waypoints.pop(0)
+                if not self._roam_waypoints:
+                    if now - self._roam_start_time >= self._roam_duration:
+                        self._finish_omnidirectional_roam()
+                    else:
+                        self._roam_waypoints = self._generate_2d_desktop_waypoints(random.randint(2, 4))
+                return
 
-                # 40% Arrival Chaining: finish walk/run with a lively flourish!
-                if random.random() < 0.42:
-                    arrival_act = "HappySpin" if (was_running and random.random() < 0.45) else random.choice(["Curious", "Wave"])
-                    self.trigger_3d_action(arrival_act)
-                    self._schedule_next_decision(2000, 3500)
-                else:
-                    self.trigger_3d_action("Idle")
-                    self._schedule_next_decision(1800, 3400)
-            else:
-                direction = 1.0 if diff > 0 else -1.0
-                self._pos_x += direction * step
+            self._pos_x += (dx / dist) * step
+            self._pos_y += (dy / dist) * step
+            self._update_window_pos()
+
+            # Smooth 3D yaw calculation using math.atan2(dx, dy)
+            target_yaw = math.atan2(dx, dy)
+            diff = (target_yaw - self._current_stage_yaw + math.pi) % (2.0 * math.pi) - math.pi
+            self._current_stage_yaw += diff * min(1.0, 9.5 * dt)
+            self._run_js(
+                f"typeof window.setStageYawOverride === 'function' && "
+                f"window.setStageYawOverride({self._current_stage_yaw:.3f});"
+            )
+            facing_dir = 1 if dx >= 0 else -1
+            self._set_3d_facing(facing_dir)
+            return
+
+        # 2.5 3-Mode Mouse Evasion AI
+        if self._state == PetState.EVADING:
+            elapsed = now - self._evasion_start_time
+
+            if elapsed >= self._evasion_duration:
+                self._finish_mouse_evasion(caught=False)
+                return
+
+            cursor = QCursor.pos()
+            pet_c = self.frameGeometry().center()
+            dx_c = pet_c.x() - cursor.x()
+            dy_c = pet_c.y() - cursor.y()
+            dist_c = math.hypot(dx_c, dy_c)
+
+            # Proximity catch condition (< 65px)
+            if dist_c < 65.0:
+                self._finish_mouse_evasion(caught=True)
+                return
+
+            avail = self._current_available_geometry()
+            min_x = float(avail.left() + 20)
+            max_x = float(avail.right() - self.WINDOW_W - 20)
+            min_y = float(avail.top() + 30)
+            max_y = float(self._taskbar_floor_y(avail))
+
+            # Mode 2: Distance escape retreat if cursor closes within 160px
+            if dist_c < 160.0:
+                norm_x = dx_c / max(1.0, dist_c)
+                norm_y = dy_c / max(1.0, dist_c)
+                self._evasion_target_x = max(min_x, min(max_x, self._pos_x + norm_x * 240.0))
+                self._evasion_target_y = max(min_y, min(max_y, self._pos_y + norm_y * 240.0))
+
+            # Mode 3: Fleeing with periodic taunts
+            if now - self._last_taunt_time >= random.uniform(2.6, 3.6):
+                self._last_taunt_time = now
+                taunts = [
+                    "잡아봐라~ 💨",
+                    "메롱! 날렵한 뽕뽕이를 따라올 수 있을까? 😝",
+                    "히히 못 잡겠지~? 🏃‍♂️✨",
+                    "슉! 바람처럼 도망치기! ⚡",
+                    "여기 있지롱~ 까꿍! 🦄💨",
+                ]
+                self.speech_bubble.show_message(random.choice(taunts), duration_ms=2000)
+                self._run_js("typeof window.triggerEmotionEmote === 'function' && window.triggerEmotionEmote('excited');")
+
+            # Sprint towards evasion target at sprint speed
+            dx = self._evasion_target_x - self._pos_x
+            dy = self._evasion_target_y - self._pos_y
+            dist = math.hypot(dx, dy)
+            step = (self._run_speed * 1.35) * dt
+
+            if dist > 8.0:
+                self._pos_x += (dx / dist) * min(dist, step)
+                self._pos_y += (dy / dist) * min(dist, step)
                 self._update_window_pos()
+
+                target_yaw = math.atan2(dx, dy)
+                diff = (target_yaw - self._current_stage_yaw + math.pi) % (2.0 * math.pi) - math.pi
+                self._current_stage_yaw += diff * min(1.0, 11.0 * dt)
+                self._run_js(
+                    f"typeof window.setStageYawOverride === 'function' && "
+                    f"window.setStageYawOverride({self._current_stage_yaw:.3f});"
+                )
+                facing_dir = 1 if dx >= 0 else -1
+                self._set_3d_facing(facing_dir)
+            else:
+                self._evasion_target_x = random.uniform(min_x, max_x)
+                self._evasion_target_y = random.uniform(min_y, max_y)
             return
 
         # 3. Spider-Man Web Multi-Swings Across Screen Edges
@@ -2469,32 +3074,47 @@ class DesktopPetWindow(QMainWindow):
                     self._schedule_next_decision(2400, 4200)
             return
 
-        # 5. Window Heist / Prank Sprint Running Overhead
+        # 5. Screen Content Heist 2.0 (Running in 2D with Stolen Content Card)
         if self._state == PetState.WINDOW_HEIST:
-            self._heist_progress += dt * 0.4
-            step = 260.0 * dt * self._heist_dir
-            self._pos_x += step
-            avail = self._current_available_geometry()
-            if self._pos_x < avail.left() + 20:
-                self._pos_x = avail.left() + 20
-                self._heist_dir = 1.0
-                self._set_3d_facing(1)
-            elif self._pos_x > avail.right() - self.WINDOW_W - 20:
-                self._pos_x = avail.right() - self.WINDOW_W - 20
-                self._heist_dir = -1.0
-                self._set_3d_facing(-1)
-            self._update_window_pos()
+            if hasattr(self, "stolen_piece_widget") and self.stolen_piece_widget.isVisible():
+                self.stolen_piece_widget.update()
 
+            # Proximity catch check (< 75px)
             cursor = QCursor.pos()
             pet_c = self.frameGeometry().center()
-            if (cursor - pet_c).manhattanLength() < 150 or self._heist_progress >= 1.0:
-                self._state = PetState.IDLE
-                self._run_js("typeof window.setWindowHeistState === 'function' && window.setWindowHeistState(false);")
-                self.trigger_3d_action("Shy", emotion="shy")
-                title = getattr(self, "_heist_title", "작업창")
-                self.speech_bubble.show_message(f"헉 들켰다! 헤헤 장난이었어요~ [{title}] 창 다시 제자리에 둘게요! 🪟💖", duration_ms=3200)
-                self._set_3d_facing(0)
-                self._schedule_next_decision(2200, 3600)
+            if (cursor - pet_c).manhattanLength() < 75:
+                self.restore_screen_heist(caught_by_user=True)
+                return
+
+            if not self._heist_waypoints:
+                avail = self._current_available_geometry()
+                self._heist_waypoints = self._generate_2d_desktop_waypoints(random.randint(3, 5))
+
+            target_x, target_y = self._heist_waypoints[0]
+            dx = target_x - self._pos_x
+            dy = target_y - self._pos_y
+            dist = math.hypot(dx, dy)
+            step = (self._run_speed * 1.15) * dt
+
+            if dist <= max(step, 8.0):
+                self._pos_x = target_x
+                self._pos_y = target_y
+                self._update_window_pos()
+                self._heist_waypoints.pop(0)
+            else:
+                self._pos_x += (dx / dist) * step
+                self._pos_y += (dy / dist) * step
+                self._update_window_pos()
+
+                target_yaw = math.atan2(dx, dy)
+                diff = (target_yaw - self._current_stage_yaw + math.pi) % (2.0 * math.pi) - math.pi
+                self._current_stage_yaw += diff * min(1.0, 9.5 * dt)
+                self._run_js(
+                    f"typeof window.setStageYawOverride === 'function' && "
+                    f"window.setStageYawOverride({self._current_stage_yaw:.3f});"
+                )
+                facing_dir = 1 if dx >= 0 else -1
+                self._set_3d_facing(facing_dir)
             return
 
         # 6. Magic Rainbow Graffiti / Doodling
@@ -2513,42 +3133,82 @@ class DesktopPetWindow(QMainWindow):
                     self._schedule_next_decision(2200, 3800)
             return
 
-        # 7. Superman Multi-Directional Flight & Prank
+        # 7. Superhero Multi-Wave Flight (Extended 8.0 ~ 25.0s with multi-wave swoops)
         if self._state == PetState.SUPERMAN_FLY:
-            self._superman_progress += dt / 3.4
-            p = min(1.0, self._superman_progress)
+            elapsed = now - self._superman_start_time
+            p = min(1.0, elapsed / max(0.1, self._superman_duration))
+            self._superman_progress = p
             avail = self._current_available_geometry()
-            sky_y = float(avail.top() + 80)
+            min_x = float(avail.left() + 40)
+            max_x = float(avail.right() - self.WINDOW_W - 40)
+            sky_y = float(avail.top() + 60)
             floor_y = self._superman_floor_y
 
-            # Multi-directional curved trajectory
-            if p < 0.25:
-                u = p / 0.25
-                self._pos_y = floor_y - (floor_y - sky_y) * (u * u)
-            elif p < 0.75:
-                u = (p - 0.25) / 0.50
-                # Wave swoop & loop
-                wave = math.sin(u * math.pi * 4) * 45.0
-                self._pos_y = sky_y + wave
-                self._pos_x = self._superman_start_x + (self._superman_target_x - self._superman_start_x) * u
+            prev_x = self._pos_x
+            prev_y = self._pos_y
+
+            # Phase 1: Takeoff (0.00 <= p < 0.12)
+            if p < 0.12:
+                u = p / 0.12
+                ease_u = u * u
+                self._pos_y = self._superman_start_y - (self._superman_start_y - sky_y) * ease_u
+                self._pos_x = self._superman_start_x + self._superman_dir * (120.0 * u)
+
+            # Phase 2: Multi-wave Swoop Cruise (0.12 <= p < 0.88)
+            elif p < 0.88:
+                cruise_p = (p - 0.12) / 0.76
+                x_osc = (math.sin(cruise_p * math.pi * self._superman_waves - math.pi / 2.0) + 1.0) / 2.0
+                self._pos_x = min_x + (max_x - min_x) * x_osc
+
+                mid_y = sky_y + (floor_y - sky_y) * 0.40
+                amp_y = (floor_y - sky_y) * 0.35
+                self._pos_y = mid_y + math.sin(cruise_p * math.pi * self._superman_waves * 2.0) * amp_y
+
+            # Phase 3: Glide Landing (0.88 <= p <= 1.0)
             else:
-                u = (p - 0.75) / 0.25
-                self._pos_y = sky_y + (floor_y - sky_y) * (u * u)
+                land_p = (p - 0.88) / 0.12
+                ease_land = land_p * land_p
+                self._pos_y = sky_y + (floor_y - sky_y) * ease_land
 
             self._update_window_pos()
-            self._run_js(f"typeof window.setSupermanFlyState === 'function' && window.setSupermanFlyState(true, {p:.3f}, {self._superman_mode});")
+
+            # Dynamic velocity, banking and yaw facing
+            vx = self._pos_x - prev_x
+            vy = self._pos_y - prev_y
+            if abs(vx) > 0.5:
+                facing_dir = 1 if vx >= 0 else -1
+                self._set_3d_facing(facing_dir)
+            if math.hypot(vx, vy) > 0.8:
+                flight_yaw = math.atan2(vx, vy)
+                diff = (flight_yaw - self._current_stage_yaw + math.pi) % (2.0 * math.pi) - math.pi
+                self._current_stage_yaw += diff * min(1.0, 10.0 * dt)
+                self._run_js(
+                    f"typeof window.setStageYawOverride === 'function' && "
+                    f"window.setStageYawOverride({self._current_stage_yaw:.3f});"
+                )
+
+            self._run_js(
+                f"typeof window.setSupermanFlyState === 'function' && "
+                f"window.setSupermanFlyState(true, {p:.3f}, {self._superman_mode});"
+            )
+
             if p >= 1.0:
                 self._state = PetState.IDLE
                 self._pos_y = floor_y
                 self._update_window_pos()
                 self._run_js("typeof window.setSupermanFlyState === 'function' && window.setSupermanFlyState(false);")
+                self._run_js("typeof window.setStageYawOverride === 'function' && window.setStageYawOverride(null);")
+                self._set_3d_facing(0)
                 self.trigger_3d_action("DropLand")
                 if self._superman_mode == 1:
-                    self.speech_bubble.show_message("히히! 낚아챈 마우스 포인터 안전하게 돌려드렸어요~ 🖱️💖", duration_ms=3000)
+                    self.speech_bubble.show_message("히히! 낚아챈 마우스 포인터 안전하게 착륙 완료! 🖱️💖", duration_ms=3200)
                 elif self._superman_mode == 2:
-                    self.speech_bubble.show_message("서류 배달 완료! 📁 우주 구경 잘 하고 왔어요~!", duration_ms=3000)
+                    self.speech_bubble.show_message("서류 파일 안전 배송 완료! 📁 우주 여행 즐거웠어요~!", duration_ms=3200)
                 else:
-                    self.speech_bubble.show_message("초음속 다방향 비행 완료! 🚀 하늘 위 공기가 정말 상쾌해요!", duration_ms=3000)
+                    self.speech_bubble.show_message(
+                        f"초음속 {int(self._superman_duration)}초 다방향 비행 완료! 🚀 상쾌해요!",
+                        duration_ms=3200,
+                    )
                 self._schedule_next_decision(2200, 3800)
             return
 
@@ -2615,6 +3275,14 @@ class DesktopPetWindow(QMainWindow):
                     self.trigger_3d_action("Stretch", emotion="happy")
                 btn = event.button()
                 if btn == Qt.MouseButton.LeftButton:
+                    # Immediate catch during Screen Content Heist or Mouse Evasion
+                    if self._state == PetState.WINDOW_HEIST:
+                        self.restore_screen_heist(caught_by_user=True)
+                        return True
+                    if self._state == PetState.EVADING:
+                        self._finish_mouse_evasion(caught=True)
+                        return True
+
                     self._left_pressed = True
                     self._is_dragging = False
                     self._drag_vel_px = (0.0, 0.0)
@@ -2839,8 +3507,18 @@ class DesktopPetWindow(QMainWindow):
             self.chat_bar.set_busy(False)
             return
 
-        # Natural Language Active Action Commands (Spider-Man, Peek, Heist, Doodle, Superman)
-        if any(w in text_clean for w in ["스파이더", "거미줄", "스윙", "spider"]):
+        # Natural Language Active Action Commands (Spider-Man, Peek, Heist 2.0, Doodle, Superman, Evasion, Roam)
+        if any(w in text_clean for w in ["술래잡기", "도망쳐", "도망가", "잡아봐", "도망", "회피", "evasion"]):
+            self.chat_bar.set_busy(False)
+            self.chat_window.add_message("pet", "술래잡기 시작! 3초 안에 도망간다~ 잡아봐라! 🏃‍♂️💨", "evasion")
+            self.start_mouse_evasion(mode="velocity")
+            return
+        elif any(w in text_clean for w in ["산책", "모험", "돌아다녀", "roam", "rpg"]):
+            self.chat_bar.set_busy(False)
+            self.chat_window.add_message("pet", "바탕화면 전방위 모험을 떠납니다! 🗺️✨", "roam")
+            self.start_omnidirectional_roam(mode="walk")
+            return
+        elif any(w in text_clean for w in ["스파이더", "거미줄", "스윙", "spider"]):
             self.chat_bar.set_busy(False)
             self.chat_window.add_message("pet", "쓩~! 🕸️ 스파이더 뽕뽕이 출동! 벽을 타고 비행합니다!", "spider")
             self.start_spider_swing()
@@ -2850,10 +3528,10 @@ class DesktopPetWindow(QMainWindow):
             self.chat_window.add_message("pet", "나 찾아봐라~ 3초 센다! 1, 2, 3... 쏙! 🙈", "hide")
             self.start_hide_and_seek()
             return
-        elif any(w in text_clean for w in ["창 훔쳐", "창 들고", "도망", "잡아봐", "heist"]):
+        elif any(w in text_clean for w in ["창 훔쳐", "창 들고", "화면 훔쳐", "화면 조각", "도망", "잡아봐", "heist"]):
             self.chat_bar.set_busy(False)
-            self.chat_window.add_message("pet", "헤헤! 작업창 들고 달립니다~! 잡아봐라~!! 🪟💨", "heist")
-            self.start_window_heist()
+            self.chat_window.add_message("pet", "헤헤! 바탕화면 한 조각 접수 완료! 잡아봐라~!! 🪟💨", "heist")
+            self.start_screen_content_heist()
             return
         elif any(w in text_clean for w in ["낙서", "그림", "하트", "별", "doodle"]):
             self.chat_bar.set_busy(False)
@@ -2863,7 +3541,7 @@ class DesktopPetWindow(QMainWindow):
             return
         elif any(w in text_clean for w in ["슈퍼맨", "하늘", "날아", "비행", "fly", "rocket"]):
             self.chat_bar.set_busy(False)
-            self.chat_window.add_message("pet", "슈퍼맨 뽕뽕이 출동! 🚀 하늘 위로 날아갑니다!", "superman")
+            self.chat_window.add_message("pet", "슈퍼맨 뽕뽕이 출동! 🚀 성층권으로 비행합니다!", "superman")
             self.start_superman_fly()
             return
 
@@ -2927,6 +3605,16 @@ class DesktopPetWindow(QMainWindow):
         self._decision_timer.stop()
         self._single_click_timer.stop()
         self._cursor_timer.stop()
+        if hasattr(self, "_heist_restore_timer"):
+            self._heist_restore_timer.stop()
+        if hasattr(self, "_heist_max_timeout_timer"):
+            self._heist_max_timeout_timer.stop()
+        if getattr(self, "_screen_hole_overlay", None) is not None:
+            try:
+                self._screen_hole_overlay.close()
+            except Exception:
+                pass
+            self._screen_hole_overlay = None
         if hasattr(self, "chat_window"):
             self.chat_window.close()
         if hasattr(self, "outlook_hud"):
