@@ -32,7 +32,11 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-CHAT_HISTORY_FILE = Path(r"c:\01.claude\11.Minipet\chat_history.json")
+if getattr(sys, "frozen", False):
+    _DATA_DIR = Path(sys.executable).resolve().parent
+else:
+    _DATA_DIR = Path(__file__).resolve().parent
+CHAT_HISTORY_FILE = _DATA_DIR / "chat_history.json"
 
 # Premium Slate Palette
 COLOR_BG_DEEP = "#030712"       # Slate 950 deep obsidian

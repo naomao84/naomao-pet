@@ -113,7 +113,16 @@ mimetypes.add_type("model/gltf+json", ".gltf")
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("application/javascript", ".mjs")
 
-APP_DIR = Path(__file__).resolve().parent
+# Robust PyInstaller Bundle & Data Directory Resolution
+if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+    BUNDLE_DIR = Path(sys._MEIPASS).resolve()
+    DATA_DIR = Path(sys.executable).resolve().parent
+else:
+    BUNDLE_DIR = Path(__file__).resolve().parent
+    DATA_DIR = BUNDLE_DIR
+
+APP_DIR = BUNDLE_DIR
+CONFIG_FILE_PATH = DATA_DIR / "pet_config.json"
 
 # Dark-Blue UI Palette (#020617, #0f172a, #1e293b)
 COLOR_BG_DEEP = "#020617"      # Slate 950
@@ -3634,7 +3643,7 @@ def _handle_unhandled_exception(exc_type, exc_value, exc_traceback):
     import traceback
     err_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
     try:
-        log_path = APP_DIR / "crash_error.log"
+        log_path = DATA_DIR / "crash_error.log"
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Unhandled Exception:\n")
             f.write(err_msg)

@@ -16,7 +16,11 @@ from typing import Any, Dict, List, Optional, Tuple
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 
-ALARM_STORAGE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pet_alarms.json")
+if getattr(sys, "frozen", False):
+    _DATA_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    _DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+ALARM_STORAGE_PATH = os.path.join(_DATA_DIR, "pet_alarms.json")
 
 
 class AlarmItem:
