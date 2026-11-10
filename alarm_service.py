@@ -11,6 +11,7 @@ import datetime
 import json
 import os
 import re
+import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal

@@ -37,8 +37,9 @@ from alarm_dialog import Visual3DAlarmDialog
 from alarm_manager_dialog import AlarmManagerDialog
 
 # Configure Chromium flags BEFORE importing QtWebEngineWidgets / creating QApplication
-# Ensures zero white flash on startup and unrestricted local GLB asset loading.
+# Ensures zero white flash on startup, PyInstaller compatibility, and unrestricted local GLB asset loading.
 _CHROMIUM_FLAGS = (
+    "--no-sandbox "
     "--default-background-color=00000000 "
     "--allow-file-access-from-files "
     "--autoplay-policy=no-user-gesture-required "

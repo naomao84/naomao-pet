@@ -13,6 +13,7 @@ A top-level, glassmorphic dark-slate floating window that:
 from __future__ import annotations
 
 import json
+import sys
 import time
 from datetime import datetime
 from pathlib import Path

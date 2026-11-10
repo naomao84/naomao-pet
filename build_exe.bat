@@ -9,6 +9,10 @@ if not exist "%PYTHON_EXE%" (
     set "PYTHON_EXE=python"
 )
 
+echo [INFO] Terminating any running Minipet process to prevent file locks...
+taskkill /f /im Minipet.exe >nul 2>&1
+timeout /t 1 /nobreak >nul
+
 echo [INFO] Using Python: %PYTHON_EXE%
 echo [INFO] Packaging Minipet into a single-file executable...
 
@@ -35,3 +39,4 @@ if %ERRORLEVEL% EQU 0 (
     echo [ERROR] Build failed with error code %ERRORLEVEL%.
 )
 pause
+
