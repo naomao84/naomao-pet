@@ -31,11 +31,23 @@ export function createSoloPlaySubsystem(ctx) {
   const mesh = (geo, m, x = 0, y = 0, z = 0) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); return o; };
   const tmpV = new THREE.Vector3();
 
-  // ------------------------------------------------------- sprite textures
+  // ------------------------------------------------------- sprite textures (with LRU cap)
   const texCache = new Map();
+  const MAX_TEX_CACHE = 80;
   function textTexture(text, color = '#ffffff', fontPx = 64) {
     const key = text + '|' + color + '|' + fontPx;
-    if (texCache.has(key)) return texCache.get(key);
+    if (texCache.has(key)) {
+      const hit = texCache.get(key);
+      texCache.delete(key);
+      texCache.set(key, hit);
+      return hit;
+    }
+    if (texCache.size >= MAX_TEX_CACHE) {
+      const oldestKey = texCache.keys().next().value;
+      const oldest = texCache.get(oldestKey);
+      if (oldest && oldest.tex) oldest.tex.dispose();
+      texCache.delete(oldestKey);
+    }
     const c = document.createElement('canvas');
     const g = c.getContext('2d');
     const font = `900 ${fontPx}px "Malgun Gothic", "Segoe UI Emoji", sans-serif`;
@@ -155,14 +167,15 @@ export function createSoloPlaySubsystem(ctx) {
   let lastResult = null;
   const levelOf = (xp) => Math.floor(Math.sqrt(xp / 20)) + 1;
   const xpForLevel = (lv) => (lv - 1) * (lv - 1) * 20;
-  function rollRarity() {
-    const r = Math.random();
-    if (r < 0.06) return { tier: 'Legendary', kr: '전설', color: '#f59e0b', mult: 3 };
-    if (r < 0.32) return { tier: 'Rare', kr: '희귀', color: '#38bdf8', mult: 1.6 };
+  function rollRarity(bonusRare = 0) {
+    const r = Math.max(0, Math.random() - bonusRare);
+    if (r < 0.08) return { tier: 'Legendary', kr: '전설', color: '#f59e0b', mult: 3 };
+    if (r < 0.36) return { tier: 'Rare', kr: '희귀', color: '#38bdf8', mult: 1.6 };
     return { tier: 'Common', kr: '일반', color: '#e2e8f0', mult: 1 };
   }
-  function grantReward(S, icon, itemName, baseXP) {
-    const rar = rollRarity();
+  function grantReward(S, icon, itemName, baseXP, extraMeta = {}) {
+    const toolBonus = (window.ppongRPGState && window.ppongRPGState.toolBonusRare) ? window.ppongRPGState.toolBonusRare : 0;
+    const rar = rollRarity(toolBonus);
     const gained = Math.round(baseXP * rar.mult);
     const before = skillXP[S.key] || 0;
     const after = before + gained;
@@ -177,7 +190,28 @@ export function createSoloPlaySubsystem(ctx) {
     if (rar.tier !== 'Common') { ring(0, 0.05, 0, rar.tier === 'Legendary' ? 0xf59e0b : 0x38bdf8, { size: 1.8, max: 0.6 }); burst(0, 1.2, 0.2, 0xfde047, 22, 1.6); }
     if (lvA > lvB) { pillar(); setTimeout(() => floatText(`LEVEL UP! ${S.def.skill} Lv.${lvA}`, '#facc15', 1.95, 0.17, 2.2), 700); }
     triggerEmotionEmote && triggerEmotionEmote(rar.tier === 'Common' && lvA === lvB ? 'proud' : 'excited');
-    lastResult = { key: S.key, skill: S.def.skill, item: itemName, icon, rarity: rar.kr, tier: rar.tier, gained, xp: after, level: lvA, leveledUp: lvA > lvB };
+    lastResult = {
+      key: S.key,
+      skill: S.def.skill,
+      item: itemName,
+      icon,
+      rarity: rar.kr,
+      tier: rar.tier,
+      gained,
+      xp: after,
+      level: lvA,
+      leveledUp: lvA > lvB,
+      ...extraMeta
+    };
+    if (typeof window.emitPpongSync === 'function') {
+      window.emitPpongSync({
+        type: 'solo_reward',
+        ...lastResult
+      });
+    }
+    if (typeof window.onPpongSoloReward === 'function') {
+      window.onPpongSoloReward(lastResult);
+    }
   }
 
   // --------------------------------------------------- pose blending core
@@ -486,6 +520,201 @@ export function createSoloPlaySubsystem(ctx) {
   });
 
   // =====================================================================
+  // HERO 6: MINING (Sub-Desktop Excavation: prospect -> 4 pickaxe strikes w/ crack decals & dirt mounds -> crystal vein shatter -> restore)
+  // =====================================================================
+  register('mining', {
+    title: '⛏️ 바탕화면 채굴', skill: '채굴', speech: '광맥 반응 감지! 바탕화면 지층을 채굴해 광석과 유물을 캐낼게요! ⛏️💎',
+    build(g) {
+      // 1. Held 3D Pickaxe
+      const pickaxe = new THREE.Group();
+      const shaft = mesh(new THREE.CylinderGeometry(0.012, 0.015, 0.48, 10), mat(0x78350f, 0.7), 0, 0.22, 0);
+      pickaxe.add(shaft);
+      const collar = mesh(new THREE.BoxGeometry(0.048, 0.045, 0.045), mat(0x475569, 0.35, 0.8), 0, 0.42, 0);
+      pickaxe.add(collar);
+      const bladeL = mesh(new THREE.ConeGeometry(0.028, 0.16, 6), mat(0x38bdf8, 0.25, 0.85), -0.08, 0.42, 0);
+      bladeL.rotation.z = Math.PI / 2 + 0.18;
+      const bladeR = mesh(new THREE.ConeGeometry(0.028, 0.16, 6), mat(0x38bdf8, 0.25, 0.85), 0.08, 0.42, 0);
+      bladeR.rotation.z = -Math.PI / 2 - 0.18;
+      pickaxe.add(bladeL, bladeR);
+      g.add(pickaxe);
+
+      // 2. Sub-Desktop Pit & Radial Crack Decal Group at (0.36, 0.012, 0.38)
+      const site = new THREE.Group();
+      site.position.set(0.36, 0.008, 0.38);
+      g.add(site);
+
+      const pitDisc = mesh(new THREE.CircleGeometry(0.24, 24), mat(0x0f172a, 0.95), 0, 0.002, 0);
+      pitDisc.rotation.x = -Math.PI / 2;
+      site.add(pitDisc);
+
+      const cracks = [];
+      for (let i = 0; i < 6; i++) {
+        const ang = (i / 6) * Math.PI * 2 + 0.2;
+        const cr = mesh(new THREE.BoxGeometry(0.26, 0.004, 0.016), glow(0x38bdf8, 0.85), Math.cos(ang) * 0.12, 0.005, Math.sin(ang) * 0.12);
+        cr.rotation.y = -ang;
+        site.add(cr);
+        cracks.push(cr);
+      }
+
+      // 3. 8 Bevelled 3D Dirt Mounds around pit rim
+      const mounds = [];
+      for (let i = 0; i < 8; i++) {
+        const ang = (i / 8) * Math.PI * 2;
+        const md = mesh(new THREE.DodecahedronGeometry(0.058, 1), mat(0x78350f, 0.92), Math.cos(ang) * 0.22, 0.02, Math.sin(ang) * 0.20);
+        md.scale.set(1.2, 0.7, 1.1);
+        site.add(md);
+        mounds.push(md);
+      }
+
+      // 4. Glowing Crystal Ore Vein Cluster emerging from pit center
+      const vein = new THREE.Group();
+      const crystals = [];
+      const cAngles = [[0, 0, 0, 0.19], [-0.06, 0.04, 0.32, 0.14], [0.07, -0.03, -0.28, 0.15], [-0.04, -0.06, -0.22, 0.12], [0.05, 0.05, 0.25, 0.13]];
+      cAngles.forEach(([cx, cz, tilt, h]) => {
+        const cMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, emissive: 0x0284c7, emissiveIntensity: 0.75, roughness: 0.18, metalness: 0.7 });
+        const shard = mesh(new THREE.OctahedronGeometry(h * 0.45, 0), cMat, cx, h * 0.5, cz);
+        shard.scale.set(0.65, 1.45, 0.65);
+        shard.rotation.z = tilt;
+        vein.add(shard);
+        crystals.push(shard);
+      });
+      site.add(vein);
+
+      // 5. Restoration Sprouts
+      const sprouts = new THREE.Group();
+      [[-0.06, 0.02], [0.06, -0.02], [0, 0.05]].forEach(([sx, sz]) => {
+        const sp = mesh(new THREE.SphereGeometry(0.035, 8, 8), mat(0x4ade80, 0.5), sx, 0.04, sz);
+        sprouts.add(sp);
+      });
+      site.add(sprouts);
+
+      return { pickaxe, bladeL, bladeR, site, pitDisc, cracks, mounds, vein, crystals, sprouts, hand: new THREE.Vector3(), swing: 0 };
+    },
+    start(p) {
+      const theme = (window.ppongRPGState && window.ppongRPGState.worldview) || 'fantasy';
+      const oreTable = {
+        fantasy: [['⛏️', '철광석'], ['💎', '미스릴 광석'], ['🔮', '마나 수정'], ['👑', '오리할콘 원석'], ['🏺', '고대 왕국 유물']],
+        cyberpunk: [['🔩', '티타늄 합금'], ['💾', '실리콘 웨이퍼'], ['⚡', '양자 코어'], ['💠', '네온 크롬 원석'], ['🧠', '구시대 AI 칩']],
+        scifi: [['🪨', '운석철'], ['🛸', '타이탄 합금'], ['🌌', '다크매터 결정'], ['⚛️', '헬륨-3 코어'], ['👽', '외계 문명 유물']],
+        cozy: [['🪨', '무지개 조약돌'], ['🐚', '고대 암모나이트 화석'], ['⭐', '별의 조각'], ['🌸', '핑크 쿼츠'], ['🧸', '시간의 타임캡슐']]
+      };
+      const paletteTable = {
+        fantasy: [0x38bdf8, 0x0284c7, 0x78350f],
+        cyberpunk: [0xf43f5e, 0x22d3ee, 0x1e293b],
+        scifi: [0xa855f7, 0x6366f1, 0x334155],
+        cozy: [0xfbbf24, 0xf472b6, 0xa16207]
+      };
+      const pal = paletteTable[theme] || paletteTable.fantasy;
+      p.oreEntry = pick(oreTable[theme] || oreTable.fantasy);
+      p.fxCol = pal[0];
+      p.crystals.forEach((c) => {
+        c.material.color.setHex(pal[0]);
+        c.material.emissive.setHex(pal[1]);
+      });
+      p.mounds.forEach((m) => { m.material.color.setHex(pal[2]); m.scale.setScalar(0.01); });
+      p.cracks.forEach((c) => { c.material.color.setHex(pal[0]); c.scale.set(0.01, 1, 1); });
+      p.pitDisc.scale.setScalar(0.01);
+      p.vein.scale.setScalar(0.01);
+      p.sprouts.visible = false;
+      p.pickaxe.visible = true;
+      p.pickaxe.scale.setScalar(0.01);
+      p.lastStrike = -1;
+      p.shattered = false;
+    },
+    phases: [
+      { name: 'prospect', dur: 0.65, anim: 'Curious',
+        enter(p) {
+          ring(0.36, 0.02, 0.38, p.fxCol, { size: 0.9, max: 0.55 });
+          floatEmoji('❗광맥 발견!', 0.36, 0.55, 0.38, { size: 0.14, color: '#38bdf8', max: 0.9 });
+        },
+        update(p, k) {
+          p.pickaxe.scale.setScalar(outBack(k));
+          P.armR(0.3, 0.8, 0.6); P.armL(-0.3, 0.6, 0.5); P.head(0.25, -0.35);
+          p.swing = 0.2;
+        }
+      },
+      { name: 'digging', dur: 3.1, anim: 'Idle',
+        enter() { blendRate = 26; },
+        update(p, k, t) {
+          const totalStrikes = 4;
+          const ht = k * totalStrikes;
+          const strikeIdx = Math.floor(ht);
+          const local = ht % 1;
+          const down = local > 0.52;
+
+          P.armR(down ? -0.15 : 1.85, 0.95, down ? 0.35 : 1.35);
+          P.armL(down ? -0.1 : 1.1, 0.85, 0.7);
+          P.lean(down ? 0.28 : -0.14, down ? 0.14 : -0.05);
+          P.head(down ? 0.28 : -0.05, -0.32);
+          p.swing = down ? -0.55 : 1.45;
+
+          const prog = clamp01((strikeIdx + (down ? 1 : local)) / totalStrikes);
+          p.pitDisc.scale.setScalar(Math.max(0.05, smooth(prog)));
+          p.cracks.forEach((cr, idx) => {
+            const ck = clamp01(prog * 1.3 - idx * 0.08);
+            cr.scale.set(Math.max(0.01, ck), 1, 1);
+          });
+          p.mounds.forEach((md, idx) => {
+            const mk = outBack(clamp01(prog * 1.25 - idx * 0.05));
+            md.scale.set(1.2 * mk, 0.75 * mk, 1.1 * mk);
+          });
+          p.vein.scale.setScalar(outBack(clamp01((prog - 0.2) / 0.8)));
+
+          if (down && p.lastStrike !== strikeIdx) {
+            p.lastStrike = strikeIdx;
+            hitStop(0.065);
+            burst(0.36, 0.12, 0.38, p.fxCol, 9, 1.25, { max: 0.55 });
+            puff(0.36, 0.05, 0.38, 0x94a3b8, 3, { max: 0.55 });
+            floatEmoji(strikeIdx === 3 ? '💥크리티컬!' : '캉!', 0.36 + rand(-0.08, 0.08), 0.38, 0.42, { size: 0.13, color: '#fde047', max: 0.65 });
+          }
+        }
+      },
+      { name: 'shatter', dur: 0.65, anim: 'Jump',
+        enter(p) {
+          hitStop(0.11);
+          ring(0.36, 0.04, 0.38, 0xfacc15, { size: 1.65, max: 0.55 });
+          ring(0.36, 0.12, 0.38, p.fxCol, { size: 1.25, max: 0.45 });
+          burst(0.36, 0.22, 0.38, 0xfde047, 26, 1.85, { up: 1.5 });
+          p.vein.scale.setScalar(0.01);
+        },
+        update(p, k) {
+          P.arms(2.1, 0.3, 0.4);
+          p.swing = -0.3;
+          p.vein.scale.setScalar(Math.max(0.01, 1 - smooth(k * 2)));
+        }
+      },
+      { name: 'reward', dur: 1.35, anim: 'WaveJump',
+        enter(p) {
+          grantReward(S, p.oreEntry[0], p.oreEntry[1], 35, { category: 'mining' });
+        },
+        update(p) {
+          p.pickaxe.visible = false;
+          P.arms(2.2, 0.2, 0.3);
+          P.head(-0.2);
+        }
+      },
+      { name: 'restore', dur: 0.65, anim: 'Idle',
+        enter(p) {
+          p.sprouts.visible = true;
+          puff(0.36, 0.05, 0.38, 0x86efac, 4, { max: 0.55 });
+        },
+        update(p, k) {
+          const s = Math.max(0.01, 1 - smooth(k));
+          p.pitDisc.scale.setScalar(s);
+          p.mounds.forEach((md) => md.scale.setScalar(s));
+          p.cracks.forEach((cr) => cr.scale.set(s, 1, 1));
+          p.sprouts.scale.setScalar(Math.sin(k * Math.PI));
+        }
+      }
+    ],
+    frame(p) {
+      handPos('R', p.hand);
+      p.pickaxe.position.copy(p.hand);
+      p.pickaxe.rotation.set(0.25, 0, -0.55 - p.swing * 0.65);
+    }
+  });
+
+  // =====================================================================
   // TEMPLATE ENGINE for the remaining 25 activities
   //   A Craft, B Wait&Catch, C Perform, D Transform, E Explore, F Rest
   // =====================================================================
@@ -689,5 +918,9 @@ export function createSoloPlaySubsystem(ctx) {
     setSkillXP: (obj) => { skillXP = { ...(obj || {}) }; },
     getLastResult: () => lastResult,
     getPhase: () => (S.active ? S.def.phases[S.idx]?.name : null),
+    // Shared FX, Pose & Bone Attachment API for World RPG & Wave Defense
+    fxApi: {
+      burst, puff, ring, floatEmoji, floatText, itemDrop, pillar, hitStop, handPos, P, applyPose, makeSprite, mat, glow, mesh, root
+    }
   };
 }

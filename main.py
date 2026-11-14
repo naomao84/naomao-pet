@@ -107,6 +107,7 @@ from PyQt6.QtWidgets import (
 from outlook_service import OutlookAIAssistantService, OutlookEmailItem
 from outlook_hud import OutlookHUDDrawer
 from chat_window import FloatingChatWindow
+from rpg_world_hub import RPGWorldState, RPGWorldHubDrawer, WORLDVIEW_INFO
 
 # Ensure standard 3D asset MIME types are registered on Windows
 mimetypes.add_type("model/gltf-binary", ".glb")
@@ -1208,6 +1209,9 @@ class PetState(Enum):
     SUPERMAN_FLY = auto()
     SOLO_PLAY = auto()
     EVADING = auto()
+    EXCAVATING = auto()
+    SKIRMISH = auto()
+    WAVE_DEFENSE = auto()
 
 
 def _create_unicorn_tray_icon() -> QIcon:
@@ -1245,14 +1249,26 @@ def _create_unicorn_tray_icon() -> QIcon:
 
 
 class SilentWebEnginePage(QWebEnginePage):
-    """Forwards critical JS console errors to stderr while keeping info logs quiet."""
+    """Forwards critical JS console errors to stderr and routes __PPONG_SYNC__ bridge events to Python."""
+
+    bridge_event = pyqtSignal(dict)
 
     def javaScriptConsoleMessage(self, level, message: str, line_id: int, source_id: str) -> None:
+        if message and message.startswith("__PPONG_SYNC__:"):
+            try:
+                raw_json = message[len("__PPONG_SYNC__:") :]
+                payload = json.loads(raw_json)
+                if isinstance(payload, dict):
+                    self.bridge_event.emit(payload)
+            except Exception:
+                pass
+            return
         if level == QWebEnginePage.JavaScriptConsoleMessageLevel.ErrorMessageLevel:
             sys.stderr.write(f"[WebGL JS Error] {message} (line {line_id})\n")
 
 
 SOLO_ACTIONS_INFO: dict[str, dict[str, str]] = {
+    "mining": {"cat": "모험 & 일상", "title": "⛏️ 바탕화면 채굴 (Desktop Excavation)", "speech": "광맥 반응 감지! 바탕화면 지층을 채굴해 광석과 유물을 캐낼게요! ⛏️💎"},
     "build_house": {"cat": "모험 & 일상", "title": "🏠 집 짓기 (Building House)", "speech": "뚝딱뚝딱! 🔨 나만의 멋진 알록달록 미니 하우스를 짓는 중이에요! 🏠✨"},
     "fishing": {"cat": "모험 & 일상", "title": "🎣 낚시하기 (Fishing)", "speech": "입질이 왔다! 으랏차차~! 🐟 황금 월척 낚았어요! 🎣✨"},
     "hunting": {"cat": "모험 & 일상", "title": "🦋 곤충 채집 (Bug Hunting)", "speech": "살금살금... 얍! 🦋 영롱한 무지개 나비를 채집했어요! 🌟"},
@@ -1462,6 +1478,7 @@ class DesktopPetWindow(QMainWindow):
 
         page = SilentWebEnginePage(self.web_view)
         page.setBackgroundColor(Qt.GlobalColor.transparent)
+        page.bridge_event.connect(self._on_js_bridge_event)
         settings = page.settings()
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessFileUrls, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
@@ -1489,11 +1506,24 @@ class DesktopPetWindow(QMainWindow):
         self.chat_window.mail_requested.connect(self.toggle_outlook_hud)
         self.chat_window.alarm_requested.connect(self.open_alarm_manager)
         self.chat_window.cleanup_requested.connect(lambda: self.run_pc_cleanup(True))
+        self.chat_window.rpg_hub_requested.connect(self.toggle_rpg_hub)
 
         # Outlook AI Service & HUD Drawer
         self.outlook_service = OutlookAIAssistantService(self)
         self.outlook_hud = OutlookHUDDrawer(self.outlook_service)
         self.outlook_service.new_urgent_mail_received.connect(self._on_urgent_mail_received)
+
+        # 3D World & Wave Defense RPG Hub (Phase 1 ~ Phase 4 Master System)
+        self.rpg_state = RPGWorldState(DATA_DIR)
+        self.rpg_hub = RPGWorldHubDrawer(self.rpg_state)
+        self.rpg_hub.dispatch_requested.connect(self.handle_rpg_dispatch)
+        self.rpg_hub.worldview_changed.connect(self.set_worldview_theme)
+        self.rpg_hub.work_safe_toggled.connect(lambda chk: self.set_work_safe_mode(chk, show_bubble=True))
+        self.rpg_hub.skirmish_requested.connect(self.start_desktop_skirmish)
+        self.rpg_hub.wave_defense_requested.connect(self.start_wave_defense_game)
+        self.rpg_hub.stop_combat_requested.connect(self.stop_combat_and_defense)
+        self.rpg_hub.state_modified.connect(self._sync_rpg_to_js)
+        self._excavating_target: Optional[tuple[float, float]] = None
 
         quit_shortcut = QShortcut(QKeySequence("Ctrl+Q"), self)
         quit_shortcut.activated.connect(QApplication.instance().quit)
@@ -1501,6 +1531,22 @@ class DesktopPetWindow(QMainWindow):
         # Hotkey Ctrl+M to toggle Outlook AI Mail Hub
         mail_shortcut = QShortcut(QKeySequence("Ctrl+M"), self)
         mail_shortcut.activated.connect(self.toggle_outlook_hud)
+
+        # Hotkey Ctrl+R to toggle 3D World & Wave Defense RPG Hub
+        rpg_hub_shortcut = QShortcut(QKeySequence("Ctrl+R"), self)
+        rpg_hub_shortcut.activated.connect(self.toggle_rpg_hub)
+
+        # Hotkey Ctrl+D to launch 3D Wave Defense Mini-Game
+        defense_shortcut = QShortcut(QKeySequence("Ctrl+D"), self)
+        defense_shortcut.activated.connect(lambda: self.start_wave_defense_game(self.rpg_state.max_cleared_wave + 1))
+
+        # Hotkey Ctrl+E to trigger Intermittent Desktop Skirmish Defense
+        skirmish_shortcut = QShortcut(QKeySequence("Ctrl+E"), self)
+        skirmish_shortcut.activated.connect(self.start_desktop_skirmish)
+
+        # Hotkey Ctrl+Shift+W to toggle Non-Intrusive Work-Safe Click-Through Mode
+        work_safe_shortcut = QShortcut(QKeySequence("Ctrl+Shift+W"), self)
+        work_safe_shortcut.activated.connect(lambda: self.set_work_safe_mode(not self.rpg_state.work_safe_mode, show_bubble=True))
 
         # Hotkeys for character scaling: Ctrl+= / Ctrl++ (zoom in), Ctrl+- (zoom out), Ctrl+0 (reset)
         zoom_in_1 = QShortcut(QKeySequence("Ctrl+="), self)
@@ -1598,6 +1644,18 @@ class DesktopPetWindow(QMainWindow):
         self._cursor_timer.timeout.connect(self._sync_global_cursor_to_3d)
         self._cursor_timer.start()
 
+        # Intermittent Desktop Skirmish Timer (every 12 minutes, spawns desktop invaders if idle/free)
+        self._skirmish_timer = QTimer(self)
+        self._skirmish_timer.setInterval(12 * 60 * 1000)
+        self._skirmish_timer.timeout.connect(self._on_intermittent_skirmish_timer)
+        self._skirmish_timer.start()
+
+        # Farm Crop Growth Sync Timer (every 15 seconds)
+        self._farm_sync_timer = QTimer(self)
+        self._farm_sync_timer.setInterval(15 * 1000)
+        self._farm_sync_timer.timeout.connect(self._on_farm_growth_tick)
+        self._farm_sync_timer.start()
+
     def _init_tray_icon(self) -> None:
         self.tray_icon: Optional[QSystemTrayIcon] = None
         if not QSystemTrayIcon.isSystemTrayAvailable():
@@ -1638,6 +1696,44 @@ class DesktopPetWindow(QMainWindow):
 
         act_snack = QAction("Feed Rainbow Treat 🍬 (F)", self)
         act_snack.triggered.connect(self.feed_snack)
+
+        # 0. 3D World & Wave Defense RPG Hub Actions & Submenu
+        act_rpg_hub = QAction("🏰 3D World & Defense Hub (월드 & 디펜스 사령부 / Ctrl+R)", self)
+        act_rpg_hub.triggered.connect(self.toggle_rpg_hub)
+
+        rpg_menu = QMenu("⚔️ 3D World · Mining · Wave Defense (월드 & 디펜스)", menu)
+        rpg_menu.setStyleSheet(menu.styleSheet())
+
+        act_rpg_open = QAction("🏰 Open World & Defense Hub (사령부 열기 / Ctrl+R)", self)
+        act_rpg_open.triggered.connect(self.show_rpg_hub)
+        rpg_menu.addAction(act_rpg_open)
+
+        act_rpg_mine = QAction("⛏️ Desktop Roaming Mining (바탕화면 채굴 출동)", self)
+        act_rpg_mine.triggered.connect(self.start_roaming_excavation)
+        rpg_menu.addAction(act_rpg_mine)
+
+        act_rpg_skirmish = QAction("🛡️ Desktop Skirmish Defense (바탕화면 침입자 수호전 / Ctrl+E)", self)
+        act_rpg_skirmish.triggered.connect(self.start_desktop_skirmish)
+        rpg_menu.addAction(act_rpg_skirmish)
+
+        act_rpg_wave = QAction("⚔️ 3D Wave Defense Mini-Game (웨이브 디펜스 출격 / Ctrl+D)", self)
+        act_rpg_wave.triggered.connect(lambda: self.start_wave_defense_game(self.rpg_state.max_cleared_wave + 1))
+        rpg_menu.addAction(act_rpg_wave)
+
+        rpg_menu.addSeparator()
+        self.act_work_safe = QAction("💼 Work-Safe Click-Through Mode (업무 집중 클릭 관통 / Ctrl+Shift+W)", self)
+        self.act_work_safe.setCheckable(True)
+        self.act_work_safe.setChecked(self.rpg_state.work_safe_mode)
+        self.act_work_safe.toggled.connect(lambda chk: self.set_work_safe_mode(chk, show_bubble=True))
+        rpg_menu.addAction(self.act_work_safe)
+
+        wv_menu = QMenu("🌌 4 Multi-Worldviews (4대 세계관 테마)", rpg_menu)
+        wv_menu.setStyleSheet(menu.styleSheet())
+        for wv_key, wv_meta in WORLDVIEW_INFO.items():
+            act_wv = QAction(f"{wv_meta['label']} — {wv_meta['desc']}", self)
+            act_wv.triggered.connect(lambda _c, k=wv_key: self.set_worldview_theme(k))
+            wv_menu.addAction(act_wv)
+        rpg_menu.addMenu(wv_menu)
 
         # 1. Pet Size Scaling Submenu (supports down to 35% micro size!)
         size_menu = QMenu("Pet Size (크기 조절)", menu)
@@ -1827,6 +1923,8 @@ class DesktopPetWindow(QMainWindow):
         act_quit.triggered.connect(QApplication.instance().quit)
 
         menu.addAction(act_chat)
+        menu.addAction(act_rpg_hub)
+        menu.addMenu(rpg_menu)
         menu.addAction(act_mail)
         menu.addAction(act_mail_check)
         menu.addAction(act_snack)
@@ -2157,16 +2255,339 @@ class DesktopPetWindow(QMainWindow):
                 f"typeof window.setMeadowTrailEnabled === 'function' && "
                 f"window.setMeadowTrailEnabled({'true' if self._meadow_trail_enabled else 'false'});"
             )
+            self._sync_rpg_to_js()
+            if self.rpg_state.work_safe_mode:
+                self.set_work_safe_mode(True, show_bubble=False)
             QTimer.singleShot(
                 520,
                 lambda: (
+                    self._sync_rpg_to_js(),
                     self.trigger_3d_action("Wave", speech_ms=4200, emotion="happy"),
                     self.speech_bubble.show_message(
-                        "안녕! 나는 뽕뽕이야! 10가지 감정과 풀밭 발자국, 휠 크기 조절까지 준비 완료! 🌈✨",
+                        "안녕! 나는 뽕뽕이야! 4대 세계관 월드(채굴·농사·낚시·요리·대장간)와 3D 웨이브 디펜스 준비 완료! (Ctrl+R 사령부) 🌈⚔️",
                         duration_ms=5200,
                     ),
                 ),
             )
+
+    # -------------------------------------------------------------------------
+    # 3D World · Mining · Economy · Wave Defense RPG Subsystem (Phase 1 ~ 4)
+    # -------------------------------------------------------------------------
+    def _sync_rpg_to_js(self) -> None:
+        if not self._web_ready or not hasattr(self, "rpg_state"):
+            return
+        self.rpg_state.tick_farm_growth()
+        payload_json = json.dumps(self.rpg_state.to_js_payload(), ensure_ascii=False)
+        xp_json = json.dumps(self.rpg_state.skill_xp, ensure_ascii=False)
+        self._run_js(
+            f"if (typeof window.syncRPGStateFromPython === 'function') window.syncRPGStateFromPython({payload_json}); "
+            f"if (typeof window.setSoloSkillXP === 'function') window.setSoloSkillXP({xp_json});"
+        )
+
+    def _on_farm_growth_tick(self) -> None:
+        if not hasattr(self, "rpg_state"):
+            return
+        prev_stage = self.rpg_state.farm_stage
+        newly_ready = self.rpg_state.tick_farm_growth()
+        new_stage = self.rpg_state.farm_stage
+        if newly_ready or new_stage != prev_stage:
+            self._sync_rpg_to_js()
+            if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+                self.rpg_hub.refresh_ui()
+            if newly_ready and not self.chat_bar.isVisible():
+                self.speech_bubble.show_message(
+                    "🌾 [3D 미니 텃밭] 황금 작물이 다 자랐어요! 사령부(Ctrl+R)에서 수확해보세요! ✨",
+                    duration_ms=3800,
+                )
+
+    def _on_intermittent_skirmish_timer(self) -> None:
+        if self._prefs.action_frequency == "off":
+            return
+        if self.is_action_busy():
+            return
+        if self._state in {PetState.IDLE, PetState.WALK, PetState.RUN}:
+            self.start_desktop_skirmish()
+
+    def toggle_rpg_hub(self) -> None:
+        if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+            self.rpg_hub.hide()
+        else:
+            self.show_rpg_hub()
+
+    def show_rpg_hub(self) -> None:
+        if hasattr(self, "rpg_hub"):
+            self._sync_rpg_to_js()
+            self.rpg_hub.show_beside_pet(self.frameGeometry())
+            self.trigger_3d_action("Curious", emotion="curious")
+
+    def set_work_safe_mode(self, enabled: bool, show_bubble: bool = True) -> None:
+        """Applies Win32 WS_EX_TRANSPARENT click-through & semi-opacity so work is never interrupted."""
+        enabled = bool(enabled)
+        self.rpg_state.work_safe_mode = enabled
+        self.rpg_state.save()
+        if hasattr(self, "act_work_safe") and self.act_work_safe.isChecked() != enabled:
+            self.act_work_safe.setChecked(enabled)
+        if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+            self.rpg_hub.refresh_ui()
+
+        try:
+            hwnd = int(self.winId())
+            user32 = ctypes.windll.user32
+            GWL_EXSTYLE = -20
+            WS_EX_LAYERED = 0x00080000
+            WS_EX_TRANSPARENT = 0x00000020
+            cur_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            if enabled:
+                new_style = cur_style | WS_EX_LAYERED | WS_EX_TRANSPARENT
+            else:
+                new_style = cur_style & ~WS_EX_TRANSPARENT
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
+        except Exception:
+            pass
+
+        self.setWindowOpacity(0.78 if enabled else 1.0)
+        if show_bubble:
+            msg = (
+                "💼 [업무 집중 모드 ON] 마우스 클릭이 뽕뽕이를 관통합니다! (해제: Ctrl+Shift+W 또는 사령부)"
+                if enabled
+                else "🦄 [업무 집중 모드 OFF] 다시 뽕뽕이와 직접 교감할 수 있어요!"
+            )
+            self.speech_bubble.show_message(msg, duration_ms=3500)
+
+    def set_worldview_theme(self, theme_key: str) -> None:
+        if theme_key not in WORLDVIEW_INFO:
+            return
+        self.rpg_state.worldview = theme_key
+        self.rpg_state.save()
+        self._sync_rpg_to_js()
+        self._run_js(
+            f"typeof window.applyWorldviewTheme === 'function' && "
+            f"window.applyWorldviewTheme({json.dumps(theme_key)});"
+        )
+        if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+            self.rpg_hub.refresh_ui()
+        meta = WORLDVIEW_INFO[theme_key]
+        self.trigger_3d_action("HappySpin", emotion="excited")
+        self.speech_bubble.show_message(
+            f"🌌 세계관 전환 완료: [{meta['label']}]\n{meta['desc']} ✨",
+            duration_ms=3600,
+        )
+
+    def handle_rpg_dispatch(self, task_key: str) -> None:
+        """Dispatches a task immediately if idle, or pushes it to the 3-slot Task Queue."""
+        if task_key == "auto_queue":
+            self.rpg_state.dispatch_queue = ["mining", "gardening", "fishing"]
+            self.rpg_state.save()
+            if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+                self.rpg_hub.refresh_ui()
+            if not self.is_action_busy():
+                next_t = self.rpg_state.dispatch_queue.pop(0)
+                self.rpg_state.save()
+                if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+                    self.rpg_hub.refresh_ui()
+                self._execute_dispatched_task(next_t)
+            else:
+                self.speech_bubble.show_message(
+                    "🔄 [연속 3슬롯 예약 완료] 채굴 ➔ 농사 ➔ 낚시 순서로 자동 수행합니다!",
+                    duration_ms=3200,
+                )
+            return
+
+        if not self.is_action_busy() and self._state in {PetState.IDLE, PetState.WALK, PetState.RUN, PetState.SITTING}:
+            self._execute_dispatched_task(task_key)
+        else:
+            if len(self.rpg_state.dispatch_queue) < 3:
+                self.rpg_state.dispatch_queue.append(task_key)
+                self.rpg_state.save()
+                if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+                    self.rpg_hub.refresh_ui()
+                self.speech_bubble.show_message(
+                    f"📋 작업 대기열에 [{task_key}] 추가 완료! ({len(self.rpg_state.dispatch_queue)}/3)",
+                    duration_ms=2600,
+                )
+            else:
+                self._execute_dispatched_task(task_key)
+
+    def _execute_dispatched_task(self, task_key: str) -> None:
+        if task_key == "mining":
+            self.start_roaming_excavation()
+        elif task_key == "gardening":
+            self.rpg_state.water_farm()
+            self._sync_rpg_to_js()
+            if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+                self.rpg_hub.refresh_ui()
+            self.play_solo_action("gardening")
+        elif task_key == "fishing":
+            self.play_solo_action("fishing")
+        elif task_key == "skirmish":
+            self.start_desktop_skirmish()
+
+    def start_roaming_excavation(self) -> None:
+        """Roams across the desktop to locate a rich ore vein, then excavates with a 3D pickaxe."""
+        if self._is_dragging or self._left_pressed:
+            return
+        self.cancel_all_active_actions()
+        self._decision_timer.stop()
+        self._sync_rpg_to_js()
+
+        pts = self._generate_2d_desktop_waypoints(1)
+        self._excavating_target = pts[0] if pts else (self._pos_x, self._pos_y)
+        self._state = PetState.EXCAVATING
+        self.trigger_3d_action("Run", emotion="excited")
+        self.speech_bubble.show_message(
+            "⛏️ 바탕화면 광맥 탐지 완료! 채굴 포인트로 출동합니다~! 💎",
+            duration_ms=3000,
+        )
+
+    def start_desktop_skirmish(self) -> None:
+        """Triggers an intermittent desktop skirmish (1~2 invaders) to protect the desktop."""
+        if self._is_dragging or self._left_pressed:
+            return
+        self.cancel_all_active_actions()
+        self._decision_timer.stop()
+        self._sync_rpg_to_js()
+        self._state = PetState.SKIRMISH
+        self._set_3d_facing(1)
+        self._run_js("typeof window.startSkirmish === 'function' && window.startSkirmish();")
+        wv_mode = self.rpg_state.worldview
+        msg = (
+            "🫧 바탕화면에 장난꾸러기 방울이 나타났어요! 몽글몽글 정화 출동! ✨"
+            if wv_mode == "cozy"
+            else "🛡️ [바탕화면 침입 경보] 적이 나타났어요! 뽕뽕이가 바탕화면을 수호합니다! (클릭 시 벼락 스마이트 ⚡)"
+        )
+        self.speech_bubble.show_message(msg, duration_ms=4500)
+
+    def start_wave_defense_game(self, wave_num: int = 1) -> None:
+        """Launches the 3D Wave Siege Defense Mini-Game at the specified wave."""
+        if self._is_dragging or self._left_pressed:
+            return
+        wave_num = max(1, int(wave_num))
+        self.cancel_all_active_actions()
+        self._decision_timer.stop()
+        self._sync_rpg_to_js()
+        self._state = PetState.WAVE_DEFENSE
+        self._set_3d_facing(1)
+        self._run_js(f"typeof window.startWaveDefense === 'function' && window.startWaveDefense({wave_num});")
+        diag = self.rpg_state.diagnose_wave_readiness_dict(wave_num)
+        boss_tag = " [👑 보스 웨이브!]" if wave_num % 5 == 0 else ""
+        self.speech_bubble.show_message(
+            f"⚔️ [Wave {wave_num}{boss_tag} 디펜스 개시!]\n"
+            f"전투력 {diag['player_cp']} vs 권장 {diag['rec_cp']} | 마우스 클릭으로 벼락 지원 가능! ⚡",
+            duration_ms=5200,
+        )
+
+    def stop_combat_and_defense(self) -> None:
+        """Stops any active Skirmish or Wave Defense session and returns to peaceful mode."""
+        self._run_js("typeof window.stopCombatAndDefense === 'function' && window.stopCombatAndDefense();")
+        if self._state in {PetState.SKIRMISH, PetState.WAVE_DEFENSE, PetState.EXCAVATING}:
+            self._state = PetState.IDLE
+        self._set_3d_facing(0)
+        self.trigger_3d_action("Idle")
+        self._schedule_next_decision(2200, 3800)
+
+    def _on_js_bridge_event(self, payload: dict) -> None:
+        """Handles real-time events emitted by solo_play.js and world_rpg_defense.js via __PPONG_SYNC__."""
+        if not isinstance(payload, dict) or not hasattr(self, "rpg_state"):
+            return
+        etype = payload.get("type", "")
+
+        if etype == "solo_reward":
+            prev_lv = self.rpg_state.pet_level
+            summary_str = self.rpg_state.process_solo_reward(payload)
+            self._sync_rpg_to_js()
+            if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+                self.rpg_hub.refresh_ui()
+            if self.rpg_state.pet_level > prev_lv:
+                self.speech_bubble.show_message(
+                    f"🎉 [레벨 업! Lv.{self.rpg_state.pet_level}] {summary_str} ✨",
+                    duration_ms=4200,
+                )
+
+        elif etype == "bento_consumed":
+            bento_key = payload.get("bentoKey")
+            if self.rpg_state.consume_bento_from_js(bento_key):
+                if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+                    self.rpg_hub.refresh_ui()
+
+        elif etype == "enemy_defeated":
+            gold_gain = int(payload.get("goldReward", payload.get("gold", 18)))
+            xp_gain = int(payload.get("xpReward", payload.get("xp", 22)))
+            core_drop = int(payload.get("coreDrop", 1))
+            is_boss = bool(payload.get("isBoss", False))
+            self.rpg_state.gold += gold_gain
+            self.rpg_state.total_enemies_defeated += 1
+            leveled = self.rpg_state.add_pet_xp(xp_gain)
+            if is_boss or random.random() < 0.35:
+                self.rpg_state.inventory["invader_core"] = self.rpg_state.inventory.get("invader_core", 0) + max(1, core_drop)
+            self.rpg_state.save()
+            self._sync_rpg_to_js()
+            if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+                self.rpg_hub.refresh_ui()
+            if leveled:
+                self.speech_bubble.show_message(
+                    f"⚔️ 적 처치 & 레벨 업! Lv.{self.rpg_state.pet_level} 달성! (공격력/체력 상승!) 🌟",
+                    duration_ms=3500,
+                )
+
+        elif etype == "skirmish_victory":
+            bonus_gold = int(payload.get("bonusGold", 35))
+            bonus_xp = int(payload.get("bonusXp", 30))
+            self.rpg_state.gold += bonus_gold
+            self.rpg_state.inventory["invader_core"] = self.rpg_state.inventory.get("invader_core", 0) + 1
+            self.rpg_state.add_pet_xp(bonus_xp)
+            self.rpg_state.save()
+            self._sync_rpg_to_js()
+            if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+                self.rpg_hub.refresh_ui()
+            if self._state == PetState.SKIRMISH:
+                self._state = PetState.IDLE
+                self._schedule_next_decision(2600, 4200)
+            self.speech_bubble.show_message(
+                f"🛡️ [바탕화면 수호 완료!] 침입자를 모두 물리쳤어요! (+{bonus_gold}G, +{bonus_xp}XP, 침입자 코어 +1) 🏆",
+                duration_ms=4200,
+            )
+
+        elif etype == "wave_defense_result":
+            victory = bool(payload.get("victory", False))
+            wave_num = int(payload.get("wave", 1))
+            reward_gold = int(payload.get("goldReward", payload.get("rewardGold", 80 + wave_num * 35)))
+            reward_xp = int(payload.get("xpReward", payload.get("rewardXp", 45 + wave_num * 15)))
+            reward_core = int(payload.get("coreReward", payload.get("rewardCore", 3 if wave_num % 5 == 0 else 1)))
+
+            if self._state == PetState.WAVE_DEFENSE:
+                self._state = PetState.IDLE
+                self._schedule_next_decision(3000, 4800)
+
+            if victory:
+                self.rpg_state.gold += reward_gold
+                self.rpg_state.inventory["invader_core"] = self.rpg_state.inventory.get("invader_core", 0) + reward_core
+                if wave_num % 5 == 0:
+                    self.rpg_state.inventory["ore_legendary"] = self.rpg_state.inventory.get("ore_legendary", 0) + 1
+                self.rpg_state.highest_wave = max(self.rpg_state.highest_wave, wave_num)
+                self.rpg_state.add_pet_xp(reward_xp)
+                self.rpg_state.save()
+                self._sync_rpg_to_js()
+                if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+                    self.rpg_hub.refresh_ui()
+                msg = (
+                    f"🏆 [Wave {wave_num} 디펜스 승리!]\n"
+                    f"보상: +{reward_gold}G, +{reward_xp}XP, 침입자 코어 +{reward_core}개 획득! 🎉"
+                )
+                self.speech_bubble.show_message(msg, duration_ms=5500)
+                if hasattr(self, "chat_window"):
+                    self.chat_window.add_message("pet", msg, "defense_win")
+            else:
+                diag = self.rpg_state.diagnose_wave_readiness_dict(wave_num)
+                advice_str = "\n".join(f"• {a}" for a in diag["advices"])
+                msg = (
+                    f"💥 [Wave {wave_num} 방어선 돌파됨 - 성장 가이드]\n"
+                    f"{advice_str}\n(Ctrl+R 사령부에서 채굴·농사·낚시·강화로 스펙업 해보세요!)"
+                )
+                self.speech_bubble.show_message(msg, duration_ms=6800)
+                if hasattr(self, "chat_window"):
+                    self.chat_window.add_message("pet", msg, "defense_fail")
+                if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+                    self.rpg_hub.refresh_ui()
 
     def _sync_global_cursor_to_3d(self) -> None:
         if not self._web_ready:
@@ -2401,7 +2822,8 @@ class DesktopPetWindow(QMainWindow):
             "if (typeof window.setMagicDoodleState === 'function') window.setMagicDoodleState(false); "
             "if (typeof window.setSupermanFlyState === 'function') window.setSupermanFlyState(false); "
             "if (typeof window.setStageYawOverride === 'function') window.setStageYawOverride(null); "
-            "if (typeof window.stopSoloAction === 'function') window.stopSoloAction();"
+            "if (typeof window.stopSoloAction === 'function') window.stopSoloAction(); "
+            "if (typeof window.stopCombatAndDefense === 'function') window.stopCombatAndDefense();"
         )
         self._current_stage_yaw = 0.0
         self._doodle_proud_triggered = False
@@ -2409,6 +2831,7 @@ class DesktopPetWindow(QMainWindow):
         self._roam_waypoints.clear()
         self._roam_duration = 0.0
         self._heist_waypoints.clear()
+        self._excavating_target = None
         if self._active_worker is not None and self._active_worker.isRunning():
             try:
                 self._active_worker.terminate()
@@ -2434,6 +2857,9 @@ class DesktopPetWindow(QMainWindow):
                 PetState.MAGIC_DOODLE,
                 PetState.SUPERMAN_FLY,
                 PetState.SOLO_PLAY,
+                PetState.EXCAVATING,
+                PetState.SKIRMISH,
+                PetState.WAVE_DEFENSE,
                 PetState.FALLING,
                 PetState.PETTING,
                 PetState.INTERACTING,
@@ -2448,6 +2874,15 @@ class DesktopPetWindow(QMainWindow):
             if self._state in {PetState.WALK, PetState.RUN, PetState.SITTING}:
                 self._pause_autonomous_walk()
             self._schedule_next_decision(3000, 5000)
+            return
+
+        # Priority 0: Execute user's Intermittent Task Dispatch Queue (3-slot queue)
+        if hasattr(self, "rpg_state") and self.rpg_state.dispatch_queue:
+            next_task = self.rpg_state.dispatch_queue.pop(0)
+            self.rpg_state.save()
+            if hasattr(self, "rpg_hub") and self.rpg_hub.isVisible():
+                self.rpg_hub.refresh_ui()
+            self._execute_dispatched_task(next_task)
             return
 
         # Stand up from cozy taskbar sit with a cute morning Stretch!
@@ -2471,6 +2906,8 @@ class DesktopPetWindow(QMainWindow):
             threshold = 0.25 * freq_mult
             if roll < threshold:
                 candidates = []
+                if roam_span > 220:
+                    candidates.append(self.start_roaming_excavation)
                 if self._prefs.enable_spider and roam_span > 260:
                     candidates.append(self.start_spider_swing)
                 if self._prefs.enable_peek:
@@ -2903,6 +3340,41 @@ class DesktopPetWindow(QMainWindow):
             self._update_window_pos()
             norm_vy = max(-2.2, min(2.2, -self._fall_vy / 900.0))
             self._set_3d_falling_state(True, norm_vy)
+            return
+
+        # 1.8 Desktop Roaming Mining (EXCAVATING: runs to ore vein waypoint, then mines)
+        if self._state == PetState.EXCAVATING:
+            if not self._excavating_target:
+                self.play_solo_action("mining")
+                return
+            tx, ty = self._excavating_target
+            dx = tx - self._pos_x
+            dy = ty - self._pos_y
+            dist = math.hypot(dx, dy)
+            step = (self._run_speed * 1.15) * dt
+            if dist <= max(step, 10.0):
+                self._pos_x = tx
+                self._pos_y = ty
+                self._update_window_pos()
+                self._excavating_target = None
+                self._run_js("typeof window.setStageYawOverride === 'function' && window.setStageYawOverride(null);")
+                self._current_stage_yaw = 0.0
+                self.play_solo_action(
+                    "mining",
+                    custom_speech="💎 여기서 반짝이는 광맥 소리가 나요! 바탕화면 채굴 시작! ⛏️✨",
+                )
+            else:
+                self._pos_x += (dx / dist) * step
+                self._pos_y += (dy / dist) * step
+                self._update_window_pos()
+                target_yaw = math.atan2(dx, dy)
+                diff = (target_yaw - self._current_stage_yaw + math.pi) % (2.0 * math.pi) - math.pi
+                self._current_stage_yaw += diff * min(1.0, 9.5 * dt)
+                self._run_js(
+                    f"typeof window.setStageYawOverride === 'function' && "
+                    f"window.setStageYawOverride({self._current_stage_yaw:.3f});"
+                )
+                self._set_3d_facing(1 if dx >= 0 else -1)
             return
 
         # 2. Omnidirectional 2D Desktop RPG Roam (Walk / Run across full desktop)
@@ -3453,6 +3925,55 @@ class DesktopPetWindow(QMainWindow):
             self.speech_bubble.show_message(confirm_msg, duration_ms=5500)
             return
 
+        # 0.1. 3D World · Mining · Economy · Wave Defense Natural Language Commands
+        if any(w in text_clean for w in ["채굴", "광석", "곡괭이", "땅 파", "광산", "mining"]):
+            self.chat_bar.set_busy(False)
+            self.chat_window.add_message("pet", "⛏️ 바탕화면 광맥을 찾아 채굴 출동합니다! 희귀 광석을 캐올게요! 💎✨", "mining")
+            self.start_roaming_excavation()
+            return
+        if any(w in text_clean for w in ["디펜스", "웨이브", "공성전", "보스전", "defense", "wave"]):
+            self.chat_bar.set_busy(False)
+            next_w = self.rpg_state.max_cleared_wave + 1
+            self.chat_window.add_message("pet", f"⚔️ [Wave {next_w} 3D 웨이브 디펜스] 출격합니다! 성소를 함께 지켜요!", "defense")
+            self.start_wave_defense_game(next_w)
+            return
+        if any(w in text_clean for w in ["침입", "수호", "몬스터", "적 물리", "전투", "skirmish"]):
+            self.chat_bar.set_busy(False)
+            self.chat_window.add_message("pet", "🛡️ 바탕화면 침입자 수호전을 시작합니다! 뽕뽕이가 바탕화면을 지킬게요! ⚡", "skirmish")
+            self.start_desktop_skirmish()
+            return
+        if any(w in text_clean for w in ["사이버펑크", "네온", "cyberpunk"]):
+            self.chat_bar.set_busy(False)
+            self.set_worldview_theme("cyberpunk")
+            self.chat_window.add_message("pet", "⚡ 네온 사이버펑크 넷러너 세계관으로 전환 완료!", "worldview")
+            return
+        if any(w in text_clean for w in ["우주 개척", "우주 기지", "scifi", "sci-fi"]):
+            self.chat_bar.set_busy(False)
+            self.set_worldview_theme("scifi")
+            self.chat_window.add_message("pet", "🚀 성간 우주 개척단 세계관으로 전환 완료!", "worldview")
+            return
+        if any(w in text_clean for w in ["힐링 아일랜드", "코지", "cozy", "동물의 숲"]):
+            self.chat_bar.set_busy(False)
+            self.set_worldview_theme("cozy")
+            self.chat_window.add_message("pet", "🏝️ 코지 힐링 아일랜드 세계관으로 전환 완료!", "worldview")
+            return
+        if any(w in text_clean for w in ["판타지 왕국", "판타지 세계", "fantasy"]):
+            self.chat_bar.set_busy(False)
+            self.set_worldview_theme("fantasy")
+            self.chat_window.add_message("pet", "🏰 판타지 왕국 수호단 세계관으로 전환 완료!", "worldview")
+            return
+        if any(w in text_clean for w in ["업무 모드", "집중 모드", "클릭 관통", "방해 금지"]):
+            self.chat_bar.set_busy(False)
+            new_mode = not self.rpg_state.work_safe_mode
+            self.set_work_safe_mode(new_mode, show_bubble=True)
+            self.chat_window.add_message("pet", f"💼 업무 집중 클릭 관통 모드를 {'켰어요' if new_mode else '껐어요'}!", "work_safe")
+            return
+        if any(w in text_clean for w in ["사령부", "월드 허브", "상태창", "인벤토리", "대장간", "포탑", "강화", "상점"]):
+            self.chat_bar.set_busy(False)
+            self.show_rpg_hub()
+            self.chat_window.add_message("pet", "🏰 3D 월드 & 디펜스 사령부(Ctrl+R)를 열어드렸어요! 농장·채굴·요리·대장간·포탑·디펜스를 관리해보세요!", "rpg_hub")
+            return
+
         # 0.2. 30 Spectacular Solo Play Activities Natural Language Parsing
         solo_keyword_map = [
             ("build_house", ["집 지어", "집짓기", "블록", "망치"]),
@@ -3615,6 +4136,14 @@ class DesktopPetWindow(QMainWindow):
         self._decision_timer.stop()
         self._single_click_timer.stop()
         self._cursor_timer.stop()
+        if hasattr(self, "_skirmish_timer"):
+            self._skirmish_timer.stop()
+        if hasattr(self, "_farm_sync_timer"):
+            self._farm_sync_timer.stop()
+        if hasattr(self, "rpg_state"):
+            self.rpg_state.save()
+        if hasattr(self, "rpg_hub"):
+            self.rpg_hub.close()
         if hasattr(self, "_heist_restore_timer"):
             self._heist_restore_timer.stop()
         if hasattr(self, "_heist_max_timeout_timer"):

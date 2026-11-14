@@ -23,6 +23,7 @@ echo [INFO] Packaging Minipet into a single-file executable...
     --clean ^
     --add-data "index.html;." ^
     --add-data "solo_play.js;." ^
+    --add-data "world_rpg_defense.js;." ^
     --add-data "alarm_3d.html;." ^
     --add-data "vendor;vendor" ^
     --add-data "assets;assets" ^

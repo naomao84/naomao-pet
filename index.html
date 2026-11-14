@@ -82,6 +82,13 @@
     import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
     import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
     import { createSoloPlaySubsystem } from './solo_play.js';
+    import { createWorldRPGDefenseSubsystem } from './world_rpg_defense.js';
+
+    window.emitPpongSync = function emitPpongSync(payload) {
+      try {
+        console.info('__PPONG_SYNC__:' + JSON.stringify(payload));
+      } catch (_err) {}
+    };
 
     // =========================================================================
     // 1. Renderer, Studio Telephoto Camera & Designer Soft-Vinyl Lighting
@@ -366,7 +373,8 @@
       uTime: { value: 0.0 },
       uLeftFoot: { value: new THREE.Vector3(-0.20, 0.02, 1.0) },
       uRightFoot: { value: new THREE.Vector3(0.20, 0.02, 1.0) },
-      uVisible: { value: 1.0 }
+      uVisible: { value: 1.0 },
+      uWorldviewMode: { value: 0.0 } // 0=fantasy, 1=cyberpunk, 2=scifi, 3=cozy
     };
 
     const meadowStripMat = new THREE.ShaderMaterial({
@@ -388,6 +396,7 @@
         uniform vec3 uLeftFoot;
         uniform vec3 uRightFoot;
         uniform float uVisible;
+        uniform float uWorldviewMode;
         varying vec2 vUv;
         varying vec2 vWorldXZ;
 
@@ -421,10 +430,27 @@
           vec3 tipGreen  = vec3(0.48, 0.86, 0.42);
           vec3 deepMoss  = vec3(0.13, 0.44, 0.22);
 
+          if (uWorldviewMode > 0.5 && uWorldviewMode < 1.5) {
+            // Cyberpunk Neon Grid
+            baseGreen = vec3(0.06, 0.09, 0.22);
+            tipGreen  = vec3(0.13, 0.83, 0.93);
+            deepMoss  = vec3(0.95, 0.25, 0.37);
+          } else if (uWorldviewMode >= 1.5 && uWorldviewMode < 2.5) {
+            // Space Odyssey Lunar/Mars Deck
+            baseGreen = vec3(0.18, 0.20, 0.36);
+            tipGreen  = vec3(0.50, 0.55, 0.97);
+            deepMoss  = vec3(0.09, 0.10, 0.20);
+          } else if (uWorldviewMode >= 2.5) {
+            // Cozy Golden Clover Island
+            baseGreen = vec3(0.32, 0.74, 0.38);
+            tipGreen  = vec3(0.98, 0.88, 0.42);
+            deepMoss  = vec3(0.18, 0.52, 0.28);
+          }
+
           vec3 col = mix(baseGreen, tipGreen, smoothstep(-0.4, 0.7, bladeNoise));
           col = mix(col, deepMoss, press * 0.55);
 
-          // Tiny pastel meadow flower dots (yellow & white)
+          // Tiny pastel meadow flower / neon / star dots
           if (micro > 0.965) {
             col = mix(col, vec3(1.0, 0.94, 0.48), 0.75);
           } else if (micro < 0.025) {
@@ -4580,8 +4606,10 @@
     window.getCurrentActionName = () => currentActionName;
     window.isSceneReady = () => Boolean(mixer && currentAction);
 
-    // Solo Play & Transformation API (30 rich interactive activities)
+    // Solo Play & Transformation API (31 rich interactive activities incl. Mining)
+    let worldRpgSys = null;
     window.playSoloAction = (key, dur) => {
+      if (worldRpgSys && worldRpgSys.isCombatActive()) worldRpgSys.stopCombatAndDefense();
       if (soloPlaySys) return soloPlaySys.playSoloAction(key, dur);
       return false;
     };
@@ -4594,7 +4622,38 @@
     };
     window.isSoloPlayingActive = () => Boolean(soloPlaySys && soloPlaySys.isSoloPlayingActive());
     window.getSoloSkillXP = () => (soloPlaySys ? soloPlaySys.getSkillXP() : {});
+    window.setSoloSkillXP = (obj) => (soloPlaySys ? soloPlaySys.setSkillXP(obj) : null);
     window.getLastSoloResult = () => (soloPlaySys ? soloPlaySys.getLastResult() : null);
+
+    // World RPG, Skirmish, Wave Defense & Multi-Worldview Bridge API
+    window.startSkirmish = (arch) => (worldRpgSys ? worldRpgSys.startSkirmish(arch) : null);
+    window.startWaveDefense = (wave) => (worldRpgSys ? worldRpgSys.startWaveDefense(wave) : null);
+    window.stopCombatAndDefense = () => (worldRpgSys ? worldRpgSys.stopCombatAndDefense() : null);
+    window.triggerCursorSmite = (nx, ny) => (worldRpgSys ? worldRpgSys.triggerCursorSmite(nx, ny) : false);
+    window.applyWorldviewTheme = (themeKey) => {
+      const modeMap = { fantasy: 0.0, cyberpunk: 1.0, scifi: 2.0, cozy: 3.0 };
+      if (meadowUniforms && meadowUniforms.uWorldviewMode) {
+        meadowUniforms.uWorldviewMode.value = modeMap[themeKey] ?? 0.0;
+      }
+      return worldRpgSys ? worldRpgSys.applyWorldviewTheme(themeKey) : null;
+    };
+    window.syncRPGStateFromPython = (st) => {
+      if (st && st.worldview && meadowUniforms && meadowUniforms.uWorldviewMode) {
+        const modeMap = { fantasy: 0.0, cyberpunk: 1.0, scifi: 2.0, cozy: 3.0 };
+        meadowUniforms.uWorldviewMode.value = modeMap[st.worldview] ?? 0.0;
+      }
+      return worldRpgSys ? worldRpgSys.syncRPGStateFromPython(st) : null;
+    };
+    window.getRPGState = () => (worldRpgSys ? worldRpgSys.getRPGState() : {});
+    window.isCombatActive = () => Boolean(worldRpgSys && worldRpgSys.isCombatActive());
+
+    window.addEventListener('pointerdown', (e) => {
+      if (worldRpgSys && worldRpgSys.isCombatActive()) {
+        const nx = (e.clientX / Math.max(1, window.innerWidth)) * 2 - 1;
+        const ny = -((e.clientY / Math.max(1, window.innerHeight)) * 2 - 1);
+        worldRpgSys.triggerCursorSmite(nx, ny);
+      }
+    });
 
     window.addEventListener('pointermove', (e) => {
       const nx = (e.clientX / Math.max(1, window.innerWidth)) * 2 - 1;
@@ -5545,6 +5604,9 @@
       if (soloPlaySys) {
         soloPlaySys.updateSoloPlay(dt);
       }
+      if (worldRpgSys) {
+        worldRpgSys.updateWorldRPGDefense(dt, microLife.time);
+      }
 
       renderer.render(scene, camera);
     }
@@ -5561,8 +5623,24 @@
           playAnimation,
           triggerEmotionEmote,
         });
+        worldRpgSys = createWorldRPGDefenseSubsystem({
+          THREE,
+          scene,
+          camera,
+          characterPivot,
+          stageGroup,
+          hemiLight,
+          keyLight,
+          backRimLight,
+          pawFootprintMatTemplate,
+          getRigBones: () => rigBones,
+          addBoneEulerOffset,
+          playAnimation,
+          triggerEmotionEmote,
+          soloPlaySys,
+        });
       } catch (err) {
-        console.error('Failed to init solo play subsystem:', err);
+        console.error('Failed to init solo play / world RPG subsystem:', err);
       }
       animate();
     });

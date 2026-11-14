@@ -183,6 +183,7 @@ class FloatingChatWindow(QWidget):
     settings_requested = pyqtSignal()
     alarm_requested = pyqtSignal()
     cleanup_requested = pyqtSignal()
+    rpg_hub_requested = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -257,6 +258,7 @@ class FloatingChatWindow(QWidget):
         header.addWidget(lbl_status, stretch=1)
 
         # Toolbar Actions
+        btn_rpg = self._create_icon_btn("🏰", "3D 월드 & 디펜스 사령부 (Ctrl+R)", self.rpg_hub_requested.emit)
         btn_hist = self._create_icon_btn("📜", "대화 기록 토글", self._toggle_history)
         btn_mail = self._create_icon_btn("📬", "Outlook 메일 허브", self.mail_requested.emit)
         btn_alarm = self._create_icon_btn("⏰", "스마트 알람 관리", self.alarm_requested.emit)
@@ -264,7 +266,7 @@ class FloatingChatWindow(QWidget):
         btn_close = self._create_icon_btn("✕", "닫기", self.hide)
         btn_close.setStyleSheet("QPushButton { color: #ef4444; font-weight: bold; font-size: 13px; }")
 
-        for b in [btn_hist, btn_mail, btn_alarm, btn_clean, btn_close]:
+        for b in [btn_rpg, btn_hist, btn_mail, btn_alarm, btn_clean, btn_close]:
             header.addWidget(b)
 
         c_layout.addLayout(header)
@@ -284,6 +286,10 @@ class FloatingChatWindow(QWidget):
         chips_layout.setSpacing(6)
 
         quick_actions = [
+            ("🏰 월드 사령부", "사령부 열어줘"),
+            ("⛏️ 바탕화면 채굴", "채굴 출동해줘"),
+            ("⚔️ 웨이브 디펜스", "웨이브 디펜스 시작"),
+            ("🛡️ 침입자 수호", "침입자 수호전 시작"),
             ("🎣 낚시", "낚시해줘"),
             ("🏕️ 캠핑", "캠핑 가자"),
             ("☕ 커피 드립", "커피 내려줘"),
