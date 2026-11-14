@@ -83,17 +83,20 @@
 
 ## 🚀 설치 및 실행 방법
 
-### 1. 사전 요구사항
-* Windows 10 / 11
-* Python 3.10 이상
+### 1. 단일 파일 독립 실행 (권장 - Python/인터넷 불필요)
+* **`dist/Minipet.exe`**: 파이썬, 깃, 외부 라이브러리 설치 없이 더블 클릭만으로 즉시 구동됩니다.
+* **원클릭 빌드**: 최신 코드로 단일 실행 파일을 다시 생성하려면 `build_exe.bat`을 실행하세요.
+```cmd
+build_exe.bat
+```
 
-### 2. 원클릭 실행 (권장)
+### 2. 소스코드 원클릭 실행 (개발 환경)
 루트 경로의 `run_ppong.bat`을 더블 클릭하면 가상환경 구성 및 패키지 설치 후 백그라운드로 안전하게 실행됩니다.
 ```cmd
 run_ppong.bat
 ```
 
-### 3. 수동 실행
+### 3. 수동 실행 (CLI)
 ```bash
 # 1. 가상환경 생성 및 활성화
 python -m venv .venv
@@ -115,6 +118,10 @@ pythonw main.py
 ```
 11.Minipet/
 ├── assets/                  # 3D 에셋 및 리소스
+├── build_exe.bat            # 단일 파일(Minipet.exe) 원클릭 빌드 스크립트
+├── deploy_git.bat           # 원클릭 GitHub 배포 배치 스크립트
+├── vendor/                  # 100% 오프라인 Three.js v170 엔진 및 애드온 모듈
+│   └── three/               # three.module.js, GLTFLoader, MarchingCubes 등
 ├── alarm_3d.html            # Three.js 3D 모래시계 렌더링 페이지
 ├── alarm_dialog.py          # 화면 중앙 3D 입체 비주얼 알람 팝업 다이얼로그
 ├── alarm_manager_dialog.py  # 알람 목록 조회 / 편집 / 삭제 관리 UI
