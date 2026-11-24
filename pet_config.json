@@ -1,5 +1,5 @@
 {
-  "scale_factor": 0.3,
+  "scale_factor": 0.1,
   "always_on_top": true,
   "intermittent_gaze": true,
   "meadow_trail": true,
@@ -11,6 +11,8 @@
   "enable_doodle": true,
   "enable_superman": true,
   "enable_pc_clean": true,
+  "enable_workday_cairn": true,
+  "auto_start_windows": true,
   "llm_url": "http://localhost:8080/v1/chat/completions",
   "llm_model": "local-model",
   "llm_api_key": "sk-local"

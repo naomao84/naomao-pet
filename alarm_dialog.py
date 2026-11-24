@@ -103,7 +103,8 @@ class Visual3DAlarmDialog(QDialog):
                 color: #ffffff;
                 border: 1px solid rgba(255, 255, 255, 0.25);
                 border-radius: 14px;
-                font-size: 13px;
+                font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+                font-size: 15px;
                 font-weight: bold;
             }
             QPushButton:hover {

@@ -36,50 +36,51 @@ class EditAlarmDialog(QDialog):
 
     def __init__(self, item: AlarmItem, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("알람 수정")
-        self.setFixedSize(360, 220)
+        self.setWindowTitle("⏰ 알람 수정")
+        self.setFixedSize(560, 380)
         self.setStyleSheet("""
             QDialog {
-                background-color: #0f172a;
+                background-color: #0b1328;
                 color: #f8fafc;
-                border: 1px solid #38bdf8;
-                border-radius: 12px;
+                border: 2px solid #fbbf24;
+                border-radius: 16px;
             }
             QLabel {
-                color: #cbd5e1;
-                font-family: 'Malgun Gothic';
-                font-size: 13px;
-                font-weight: 600;
+                color: #e2e8f0;
+                font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+                font-size: 19px;
+                font-weight: 700;
             }
             QLineEdit, QTimeEdit {
                 background: #1e293b;
                 color: #38bdf8;
-                border: 1px solid #475569;
-                border-radius: 8px;
-                padding: 6px 10px;
-                font-size: 13px;
+                border: 1.5px solid #475569;
+                border-radius: 10px;
+                padding: 10px 14px;
+                font-size: 19px;
                 font-weight: bold;
             }
             QPushButton {
                 background: #0284c7;
                 color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-weight: bold;
-                font-size: 13px;
+                border: 1.5px solid #38bdf8;
+                border-radius: 10px;
+                padding: 11px 22px;
+                font-weight: 800;
+                font-size: 18px;
             }
             QPushButton:hover {
                 background: #38bdf8;
+                color: #020617;
             }
         """)
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(12)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(14)
+        layout.setContentsMargins(24, 22, 24, 22)
 
         title_lbl = QLabel("⏰ 알람 내용 및 시간 수정")
-        title_lbl.setStyleSheet("color: #38bdf8; font-size: 15px; font-weight: 800;")
+        title_lbl.setStyleSheet("color: #fde047; font-size: 23px; font-weight: 900;")
         layout.addWidget(title_lbl)
 
         # Label input
@@ -127,42 +128,44 @@ class AlarmManagerDialog(QDialog):
         self.alarm_manager = alarm_manager
 
         self.setWindowTitle("⏰ 미니펫 알람 관리자 (Alarm Manager)")
-        self.setFixedSize(620, 560)
+        self.setFixedSize(940, 720)
         self.setStyleSheet("""
             QDialog {
-                background-color: #0b1120;
+                background-color: #081022;
                 color: #f8fafc;
-                border: 1.5px solid #38bdf8;
-                border-radius: 16px;
+                border: 2px solid #fbbf24;
+                border-radius: 18px;
             }
             QLabel {
                 color: #e2e8f0;
-                font-family: 'Malgun Gothic';
+                font-family: 'Pretendard', 'Malgun Gothic', sans-serif;
+                font-size: 18px;
             }
             QTableWidget {
                 background-color: #0f172a;
-                border: 1px solid #334155;
-                border-radius: 10px;
+                border: 1.5px solid #334155;
+                border-radius: 12px;
                 gridline-color: #1e293b;
                 color: #f8fafc;
-                font-size: 13px;
+                font-size: 18px;
                 selection-background-color: #1e3a8a;
             }
             QHeaderView::section {
                 background-color: #1e293b;
-                color: #38bdf8;
-                font-weight: 700;
-                padding: 6px;
+                color: #fde047;
+                font-size: 18px;
+                font-weight: 800;
+                padding: 10px;
                 border: none;
-                border-bottom: 2px solid #38bdf8;
+                border-bottom: 2px solid #fbbf24;
             }
             QLineEdit, QTimeEdit {
                 background: #1e293b;
                 color: #f8fafc;
-                border: 1px solid #475569;
-                border-radius: 8px;
-                padding: 6px 10px;
-                font-size: 13px;
+                border: 1.5px solid #475569;
+                border-radius: 10px;
+                padding: 9px 14px;
+                font-size: 18px;
             }
             QLineEdit:focus, QTimeEdit:focus {
                 border-color: #38bdf8;
@@ -170,48 +173,50 @@ class AlarmManagerDialog(QDialog):
             QPushButton.quick-btn {
                 background: #1e293b;
                 color: #38bdf8;
-                border: 1px solid #38bdf8;
-                border-radius: 6px;
-                padding: 4px 8px;
-                font-size: 12px;
-                font-weight: bold;
+                border: 1.5px solid #38bdf8;
+                border-radius: 10px;
+                padding: 8px 14px;
+                font-size: 17px;
+                font-weight: 800;
             }
             QPushButton.quick-btn:hover {
                 background: #0284c7;
                 color: white;
+                border-color: #fde047;
             }
             QPushButton.action-btn {
-                background: linear-gradient(135deg, #0284c7, #38bdf8);
+                background: #0284c7;
                 color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 7px 14px;
-                font-weight: bold;
-                font-size: 13px;
+                border: 1.5px solid #fde047;
+                border-radius: 10px;
+                padding: 10px 20px;
+                font-weight: 800;
+                font-size: 18px;
             }
             QPushButton.action-btn:hover {
                 background: #38bdf8;
+                color: #020617;
             }
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(14)
+        layout.setContentsMargins(24, 22, 24, 22)
+        layout.setSpacing(16)
 
         # 1. Header (Title + Live Clock)
         header_box = QHBoxLayout()
         title_box = QVBoxLayout()
         main_title = QLabel("⏰ 미니펫 알람 및 타이머 매니저")
-        main_title.setStyleSheet("font-size: 18px; font-weight: 800; color: #38bdf8;")
+        main_title.setStyleSheet("font-size: 26px; font-weight: 900; color: #fde047;")
         sub_title = QLabel("자연어 채팅 등록 알람 및 개별 타이머를 실시간으로 확인하고 관리합니다.")
-        sub_title.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        sub_title.setStyleSheet("font-size: 16px; color: #94a3b8;")
         title_box.addWidget(main_title)
         title_box.addWidget(sub_title)
         header_box.addLayout(title_box)
         header_box.addStretch()
 
         self.live_clock_lbl = QLabel("")
-        self.live_clock_lbl.setStyleSheet("font-size: 14px; font-weight: 700; color: #f472b6; background: #1e293b; padding: 6px 12px; border-radius: 8px;")
+        self.live_clock_lbl.setStyleSheet("font-size: 22px; font-weight: 800; color: #f472b6; background: #1e293b; padding: 10px 18px; border: 1.5px solid rgba(244,114,182,0.5); border-radius: 12px;")
         header_box.addWidget(self.live_clock_lbl)
         layout.addLayout(header_box)
 
@@ -232,7 +237,7 @@ class AlarmManagerDialog(QDialog):
         self.new_time_edit.setDisplayFormat("HH:mm")
         now_dt = datetime.datetime.now() + datetime.timedelta(minutes=15)
         self.new_time_edit.setTime(QTime(now_dt.hour, now_dt.minute))
-        self.new_time_edit.setFixedWidth(85)
+        self.new_time_edit.setFixedWidth(120)
 
         self.new_label_edit = QLineEdit(self)
         self.new_label_edit.setPlaceholderText("알람 내용 입력 (예: 팀 주간 회의, 눈 스트레칭, 약 챙겨먹기)")
@@ -256,7 +261,8 @@ class AlarmManagerDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self.table.setColumnWidth(3, 140)
+        self.table.setColumnWidth(3, 210)
+        self.table.verticalHeader().setDefaultSectionSize(50)
         self.table.verticalHeader().setVisible(False)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -268,11 +274,12 @@ class AlarmManagerDialog(QDialog):
         clear_btn.setStyleSheet("""
             QPushButton {
                 background: rgba(239, 68, 68, 0.2);
-                color: #ef4444;
-                border: 1px solid #ef4444;
-                border-radius: 8px;
-                padding: 6px 14px;
-                font-weight: bold;
+                color: #fca5a5;
+                border: 1.5px solid #ef4444;
+                border-radius: 10px;
+                padding: 10px 20px;
+                font-size: 18px;
+                font-weight: 800;
             }
             QPushButton:hover {
                 background: #ef4444;
@@ -282,7 +289,7 @@ class AlarmManagerDialog(QDialog):
         clear_btn.clicked.connect(self._clear_all)
 
         close_btn = QPushButton("닫기", self)
-        close_btn.setStyleSheet("background: #334155; color: white; border-radius: 8px; padding: 6px 16px; font-weight: bold;")
+        close_btn.setStyleSheet("background: #334155; color: white; border: 1.5px solid #64748b; border-radius: 10px; padding: 10px 26px; font-size: 18px; font-weight: 800;")
         close_btn.clicked.connect(self.close)
 
         footer_box.addWidget(clear_btn)
@@ -350,11 +357,11 @@ class AlarmManagerDialog(QDialog):
                 QPushButton {
                     background: #1e3a8a;
                     color: #93c5fd;
-                    border: none;
-                    border-radius: 5px;
-                    padding: 3px 8px;
-                    font-size: 11px;
-                    font-weight: bold;
+                    border: 1px solid #3b82f6;
+                    border-radius: 7px;
+                    padding: 6px 12px;
+                    font-size: 16px;
+                    font-weight: 800;
                 }
                 QPushButton:hover {
                     background: #2563eb;
@@ -368,11 +375,11 @@ class AlarmManagerDialog(QDialog):
                 QPushButton {
                     background: #7f1d1d;
                     color: #fca5a5;
-                    border: none;
-                    border-radius: 5px;
-                    padding: 3px 8px;
-                    font-size: 11px;
-                    font-weight: bold;
+                    border: 1px solid #ef4444;
+                    border-radius: 7px;
+                    padding: 6px 12px;
+                    font-size: 16px;
+                    font-weight: 800;
                 }
                 QPushButton:hover {
                     background: #dc2626;

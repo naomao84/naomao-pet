@@ -42,6 +42,13 @@ scratch/
 
 # Local cache / user-specific data
 chat_history.json
+web_cache/
+web_profile/
+gemini_web_profile/
+dist_v*/
+pet_workday_cairn.json
+pet_config_tree.json
+pet_rpg_save.json
 
 # IDE / Editor artifacts
 .vscode/

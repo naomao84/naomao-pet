@@ -13,11 +13,17 @@
  */
 
 export function createSoloPlaySubsystem(ctx) {
-  const { THREE, characterPivot, stageGroup, getRigBones, addBoneEulerOffset, playAnimation, triggerEmotionEmote } = ctx;
+  const { THREE, scene, characterPivot, stageGroup, getRigBones, addBoneEulerOffset, playAnimation, triggerEmotionEmote } = ctx;
 
   const root = new THREE.Group();
   root.name = 'SoloPlayRPG';
+  root.scale.setScalar(0.95);
   stageGroup.add(root);
+
+  // Unscaled scene-level group so floating action texts stay crisp & readable regardless of pet scale (e.g. 0.30x)
+  const textFxGroup = new THREE.Group();
+  textFxGroup.name = 'SoloPlayTextFX';
+  (scene || stageGroup).add(textFxGroup);
 
   // ---------------------------------------------------------------- utils
   const clamp01 = (x) => Math.max(0, Math.min(1, x));
@@ -33,9 +39,9 @@ export function createSoloPlaySubsystem(ctx) {
 
   // ------------------------------------------------------- sprite textures (with LRU cap)
   const texCache = new Map();
-  const MAX_TEX_CACHE = 80;
-  function textTexture(text, color = '#ffffff', fontPx = 64) {
-    const key = text + '|' + color + '|' + fontPx;
+  const MAX_TEX_CACHE = 96;
+  function textTexture(text, color = '#ffffff', fontPx = 88, bgPill = false) {
+    const key = `${text}|${color}|${fontPx}|${bgPill ? 1 : 0}`;
     if (texCache.has(key)) {
       const hit = texCache.get(key);
       texCache.delete(key);
@@ -50,25 +56,50 @@ export function createSoloPlaySubsystem(ctx) {
     }
     const c = document.createElement('canvas');
     const g = c.getContext('2d');
-    const font = `900 ${fontPx}px "Malgun Gothic", "Segoe UI Emoji", sans-serif`;
+    const font = `800 ${fontPx}px "Jua", "Pretendard", "Malgun Gothic", "Segoe UI Emoji", sans-serif`;
     g.font = font;
-    const w = Math.ceil(g.measureText(text).width) + 40;
-    c.width = Math.max(64, w); c.height = Math.ceil(fontPx * 1.5);
+    const padX = bgPill ? Math.round(fontPx * 0.78) : 44;
+    const w = Math.ceil(g.measureText(text).width) + padX;
+    c.width = Math.max(72, w);
+    c.height = Math.ceil(fontPx * (bgPill ? 1.72 : 1.52));
+    if (bgPill) {
+      const r = Math.min(c.height * 0.44, 42);
+      const bx = 6, by = 6, bw = c.width - 12, bh = c.height - 12;
+      g.beginPath();
+      if (typeof g.roundRect === 'function') {
+        g.roundRect(bx, by, bw, bh, r);
+      } else {
+        g.rect(bx, by, bw, bh);
+      }
+      g.fillStyle = 'rgba(15, 23, 42, 0.88)';
+      g.fill();
+      g.lineWidth = 4;
+      g.strokeStyle = color;
+      g.stroke();
+    }
     g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.lineJoin = 'round'; g.lineWidth = fontPx * 0.16; g.strokeStyle = 'rgba(15,23,42,0.92)';
-    g.strokeText(text, c.width / 2, c.height / 2);
-    g.fillStyle = color; g.fillText(text, c.width / 2, c.height / 2);
+    g.lineJoin = 'round'; g.lineWidth = fontPx * 0.14; g.strokeStyle = 'rgba(2, 6, 23, 0.94)';
+    g.strokeText(text, c.width / 2, c.height / 2 + 2);
+    g.fillStyle = color; g.fillText(text, c.width / 2, c.height / 2 + 2);
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
     const entry = { tex, aspect: c.width / c.height };
     texCache.set(key, entry);
     return entry;
   }
-  function makeSprite(text, color, height = 0.18) {
-    const { tex, aspect } = textTexture(text, color);
+  function makeSprite(text, color, height = 0.26, opts = {}) {
+    const { tex, aspect } = textTexture(text, color, opts.fontPx || 88, Boolean(opts.bgPill));
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, depthWrite: false }));
-    s.scale.set(height * aspect, height, 1);
-    s.renderOrder = 50;
+    let w = height * aspect;
+    let h = height;
+    const maxW = opts.maxW || 2.15;
+    if (w > maxW) {
+      const ratio = maxW / w;
+      w = maxW;
+      h *= ratio;
+    }
+    s.scale.set(w, h, 1);
+    s.renderOrder = 60;
     s.userData.baseScale = s.scale.clone();
     return s;
   }
@@ -77,13 +108,26 @@ export function createSoloPlaySubsystem(ctx) {
   const fx = [];
   const fxGroup = new THREE.Group();
   root.add(fxGroup);
-  const sparkGeo = new THREE.SphereGeometry(0.022, 6, 6);
-  const puffGeo = new THREE.SphereGeometry(0.05, 8, 8);
-  const ringGeo = new THREE.TorusGeometry(0.3, 0.012, 6, 40);
+  const sparkGeo = new THREE.SphereGeometry(0.035, 6, 6);
+  const puffGeo = new THREE.SphereGeometry(0.08, 8, 8);
+  const ringGeo = new THREE.TorusGeometry(0.45, 0.018, 6, 40);
+
+  function disposeFxObj(obj) {
+    if (obj.parent) obj.parent.remove(obj);
+    if (obj.userData && obj.userData.disposeGeo && obj.geometry) obj.geometry.dispose();
+    if (obj.material) {
+      if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+      else obj.material.dispose();
+    }
+  }
 
   function addFx(obj, o) {
-    if (fx.length > 220) { const old = fx.shift(); fxGroup.remove(old.obj); }
-    fxGroup.add(obj);
+    if (fx.length > 220) {
+      const old = fx.shift();
+      disposeFxObj(old.obj);
+    }
+    const targetGrp = o.worldText ? textFxGroup : fxGroup;
+    targetGrp.add(obj);
     fx.push({ obj, vel: o.vel || new THREE.Vector3(), life: 0, max: o.max || 1, g: o.g || 0, grow: o.grow || 0,
       fade: o.fade !== false, wave: o.wave || 0, spin: o.spin || 0, ring: !!o.ring, item: o.item || null, startScale: obj.scale.clone() });
   }
@@ -107,24 +151,39 @@ export function createSoloPlaySubsystem(ctx) {
     addFx(m, { ring: true, grow: opts.size || 1.4, max: opts.max || 0.5 });
   }
   function floatEmoji(text, x, y, z, opts = {}) {
-    const s = makeSprite(text, opts.color || '#ffffff', opts.size || 0.14);
+    const isTextCallout = Boolean(opts.bgPill) || (/[가-힣A-Za-z0-9!]/.test(text) && text.length >= 2);
+    const sc = Math.max(0.10, stageGroup.scale.x);
+    if (isTextCallout) {
+      const h = Math.max(0.14, (opts.size || 0.12) * 1.15);
+      const s = makeSprite(text, opts.color || '#fde047', h, { bgPill: true });
+      s.position.set(x * sc, Math.min(2.1, Math.max(0.20, y * sc + 0.14)), z * sc + 0.18);
+      addFx(s, { worldText: true, vel: new THREE.Vector3(rand(-0.04, 0.04), (opts.rise ?? 0.35) * 0.45, 0), wave: opts.wave ?? 0.12, max: opts.max || 1.35 });
+      return;
+    }
+    const comp = 1.0 / Math.max(0.38, Math.min(1.0, sc));
+    const h = Math.max(opts.size || 0.18, 0.18) * (0.55 + 0.45 * comp);
+    const s = makeSprite(text, opts.color || '#ffffff', h);
     s.position.set(x, y, z);
-    addFx(s, { vel: new THREE.Vector3(rand(-0.08, 0.08), opts.rise ?? 0.45, 0), wave: opts.wave ?? 0.25, max: opts.max || 1.4 });
+    addFx(s, { vel: new THREE.Vector3(rand(-0.12, 0.12), opts.rise ?? 0.58, 0), wave: opts.wave ?? 0.34, max: opts.max || 1.55 });
   }
-  function floatText(text, color = '#fde047', y = 1.75, size = 0.15, max = 1.9) {
-    const s = makeSprite(text, color, size);
-    s.position.set(0, y, 0.25);
-    addFx(s, { vel: new THREE.Vector3(0, 0.28, 0), max });
+  function floatText(text, color = '#fde047', y = 1.65, size = 0.22, max = 2.15) {
+    const sc = Math.max(0.10, stageGroup.scale.x);
+    const charTop = 2.10 * sc;
+    const worldY = Math.min(2.35, Math.max(0.45, charTop + 0.12 + Math.max(0, y - 1.35) * 0.32));
+    const s = makeSprite(text, color, Math.max(0.15, size * 0.78), { bgPill: true });
+    s.position.set(0, worldY, 0.24);
+    addFx(s, { worldText: true, vel: new THREE.Vector3(0, 0.14, 0), max });
   }
-  function itemDrop(icon, fromY = 0.6) {
-    const s = makeSprite(icon, '#ffffff', 0.24);
+  function itemDrop(icon, fromY = 0.72) {
+    const s = makeSprite(icon, '#ffffff', 0.38);
     const dir = Math.random() < 0.5 ? -1 : 1;
-    s.position.set(dir * 0.1, fromY, 0.35);
-    addFx(s, { item: { phase: 'arc', vx: dir * 0.55, vy: 2.0, t: 0 }, max: 2.6, fade: false });
+    s.position.set(dir * 0.14, fromY, 0.38);
+    addFx(s, { item: { phase: 'arc', vx: dir * 0.68, vy: 2.3, t: 0 }, max: 2.7, fade: false });
   }
   function pillar() {
     const m = mesh(new THREE.CylinderGeometry(0.32, 0.42, 2.6, 24, 1, true), glow(0xfde68a, 0.35), 0, 1.3, 0);
     m.material.side = THREE.DoubleSide;
+    m.userData.disposeGeo = true;
     addFx(m, { max: 1.4 });
     for (let i = 0; i < 3; i++) setTimeout(() => ring(0, 0.05, 0, 0xfacc15, { size: 2.2, max: 0.7 }), i * 180);
   }
@@ -134,7 +193,7 @@ export function createSoloPlaySubsystem(ctx) {
       const f = fx[i];
       f.life += dt;
       const k = f.life / f.max;
-      if (k >= 1) { fxGroup.remove(f.obj); fx.splice(i, 1); continue; }
+      if (k >= 1) { disposeFxObj(f.obj); fx.splice(i, 1); continue; }
       const o = f.obj;
       if (f.item) {
         const it = f.item; it.t += dt;
@@ -148,7 +207,7 @@ export function createSoloPlaySubsystem(ctx) {
         } else {
           o.position.lerp(tmpV.set(0, 0.75, 0.1), 1 - Math.exp(-7 * dt));
           o.scale.copy(o.userData.baseScale).multiplyScalar(Math.max(0.05, 1 - it.t * 1.6));
-          if (it.t > 0.6) { burst(0, 0.75, 0.15, 0xfde047, 10, 0.8); fxGroup.remove(o); fx.splice(i, 1); }
+          if (it.t > 0.6) { burst(0, 0.75, 0.15, 0xfde047, 10, 0.8); disposeFxObj(o); fx.splice(i, 1); }
         }
         continue;
       }
@@ -174,6 +233,7 @@ export function createSoloPlaySubsystem(ctx) {
     return { tier: 'Common', kr: '일반', color: '#e2e8f0', mult: 1 };
   }
   function grantReward(S, icon, itemName, baseXP, extraMeta = {}) {
+    const skillName = (S && S.def && S.def.skill) ? S.def.skill : '';
     const toolBonus = (window.ppongRPGState && window.ppongRPGState.toolBonusRare) ? window.ppongRPGState.toolBonusRare : 0;
     const rar = rollRarity(toolBonus);
     const gained = Math.round(baseXP * rar.mult);
@@ -184,15 +244,15 @@ export function createSoloPlaySubsystem(ctx) {
     const into = after - xpForLevel(lvA), span = xpForLevel(lvA + 1) - xpForLevel(lvA);
     const bars = Math.round(clamp01(into / span) * 5);
     itemDrop(icon, 0.9);
-    floatText(`${icon} ${itemName}${rar.tier !== 'Common' ? ` (${rar.kr}!)` : ''}`, rar.color, 1.72, 0.14, 2.2);
-    setTimeout(() => floatText(`+EXP ${gained}`, '#a3e635', 1.55, 0.13, 1.6), 250);
-    setTimeout(() => floatText(`${S.def.skill} Lv.${lvA} ${'▰'.repeat(bars)}${'▱'.repeat(5 - bars)}`, '#f8fafc', 1.4, 0.11, 1.8), 500);
+    floatText(`${icon} ${itemName}${rar.tier !== 'Common' ? ` (${rar.kr}!)` : ''}`, rar.color, 1.68, 0.23, 2.3);
+    setTimeout(() => floatText(`+EXP ${gained}`, '#a3e635', 1.44, 0.21, 1.7), 240);
+    setTimeout(() => floatText(`${skillName} Lv.${lvA} ${'▰'.repeat(bars)}${'▱'.repeat(5 - bars)}`, '#f8fafc', 1.24, 0.20, 1.9), 480);
     if (rar.tier !== 'Common') { ring(0, 0.05, 0, rar.tier === 'Legendary' ? 0xf59e0b : 0x38bdf8, { size: 1.8, max: 0.6 }); burst(0, 1.2, 0.2, 0xfde047, 22, 1.6); }
-    if (lvA > lvB) { pillar(); setTimeout(() => floatText(`LEVEL UP! ${S.def.skill} Lv.${lvA}`, '#facc15', 1.95, 0.17, 2.2), 700); }
+    if (lvA > lvB) { pillar(); setTimeout(() => floatText(`LEVEL UP! ${skillName} Lv.${lvA}`, '#facc15', 1.88, 0.26, 2.3), 700); }
     triggerEmotionEmote && triggerEmotionEmote(rar.tier === 'Common' && lvA === lvB ? 'proud' : 'excited');
     lastResult = {
       key: S.key,
-      skill: S.def.skill,
+      skill: skillName,
       item: itemName,
       icon,
       rarity: rar.kr,
@@ -219,16 +279,17 @@ export function createSoloPlaySubsystem(ctx) {
     'leftUpLeg', 'rightUpLeg', 'leftLeg', 'rightLeg', 'tailBase', 'leftEar', 'rightEar'];
   const cur = {}, tgt = {};
   POSE_BONES.forEach((b) => { cur[b] = [0, 0, 0]; tgt[b] = [0, 0, 0]; });
+  const ampPose = (v) => Math.max(-2.15, Math.min(2.15, v * 1.05));
   const P = {
     reset() { POSE_BONES.forEach((b) => { tgt[b][0] = tgt[b][1] = tgt[b][2] = 0; }); },
     set(b, x, y, z) { const t = tgt[b]; t[0] = x; t[1] = y; t[2] = z; },
     add(b, x, y, z) { const t = tgt[b]; t[0] += x; t[1] += y; t[2] += z; },
-    // semantic arms: up (raise), fwd (swing forward), elbow (forearm bend forward)
-    armR(up, fwd = 0, elbow = 0) { P.set('rightArm', 0, -fwd, up); P.set('rightForeArm', 0, -elbow, 0); },
-    armL(up, fwd = 0, elbow = 0) { P.set('leftArm', 0, fwd, -up); P.set('leftForeArm', 0, elbow, 0); },
+    // semantic arms: up (raise), fwd (swing forward), elbow (forearm bend forward) — amplified 1.32x for macro visibility
+    armR(up, fwd = 0, elbow = 0) { P.set('rightArm', 0, -ampPose(fwd), ampPose(up)); P.set('rightForeArm', 0, -ampPose(elbow), 0); },
+    armL(up, fwd = 0, elbow = 0) { P.set('leftArm', 0, ampPose(fwd), -ampPose(up)); P.set('leftForeArm', 0, ampPose(elbow), 0); },
     arms(up, fwd = 0, elbow = 0) { P.armR(up, fwd, elbow); P.armL(up, fwd, elbow); },
-    lean(spine, chest = 0) { P.add('spine', spine, 0, 0); P.add('chest', chest, 0, 0); },
-    head(nod, turn = 0, tilt = 0) { P.add('head', nod, turn, tilt); },
+    lean(spine, chest = 0) { P.add('spine', ampPose(spine), 0, 0); P.add('chest', ampPose(chest), 0, 0); },
+    head(nod, turn = 0, tilt = 0) { P.add('head', ampPose(nod), ampPose(turn), ampPose(tilt)); },
   };
   let blendRate = 14;
   function applyPose(dt, weight) {
@@ -292,22 +353,22 @@ export function createSoloPlaySubsystem(ctx) {
       { name: 'windup', dur: 0.45, update(p, k) { P.armR(1.1 * smooth(k), 0.3, 0.6); P.lean(-0.15 * smooth(k), -0.1); P.head(-0.1); p.rodAngle = lerp(0.2, -1.6, smooth(k)); } },
       { name: 'cast', dur: 0.45, enter(p) { blendRate = 30; p.bobber.visible = true; p.line.visible = true; p.castT = 0; },
         update(p, k) { P.armR(-0.1, 1.0, 0.1); P.lean(0.18, 0.1); P.head(0.12); p.rodAngle = lerp(-1.6, 0.9, outBack(k));
-          const s = smooth(k); p.bob.set(lerp(p.tip.x, 0.55, s), lerp(p.tip.y, 0.03, s) + Math.sin(s * Math.PI) * 0.35, lerp(p.tip.z, 0.35, s)); } },
-      { name: 'wait', dur: 2.8, anim: 'Sit', enter(p) { blendRate = 10; ring(0.55, 0.03, 0.35, 0xe0f2fe, { size: 0.5 }); burst(0.55, 0.05, 0.35, 0xbae6fd, 8, 0.6); p.nextRipple = 0.9; },
+          const s = smooth(k); p.bob.set(lerp(p.tip.x, 1.05, s), lerp(p.tip.y, 0.03, s) + Math.sin(s * Math.PI) * 0.35, lerp(p.tip.z, 0.35, s)); } },
+      { name: 'wait', dur: 2.8, anim: 'Sit', enter(p) { blendRate = 10; ring(1.05, 0.03, 0.35, 0xe0f2fe, { size: 0.85 }); burst(1.05, 0.05, 0.35, 0xbae6fd, 8, 0.6); p.nextRipple = 0.9; },
         update(p, k, t, dt) { P.armR(-0.15, 0.9, 0.4); P.armL(-0.7, 0.5, 0.5); P.head(0.12 + Math.sin(t * 2) * 0.04, Math.sin(t * 0.7) * 0.12, 0);
           P.set('tailBase', 0, 0, Math.sin(t * 3) * 0.3); p.rodAngle = 0.9 + Math.sin(t * 1.3) * 0.04;
-          p.bob.set(0.55, 0.03 + Math.sin(t * 4) * 0.012, 0.35);
-          if ((p.nextRipple -= dt) <= 0) { p.nextRipple = 0.9; ring(0.55, 0.02, 0.35, 0xbae6fd, { size: 0.35, max: 0.8 }); }
+          p.bob.set(1.05, 0.03 + Math.sin(t * 4) * 0.012, 0.35);
+          if ((p.nextRipple -= dt) <= 0) { p.nextRipple = 0.9; ring(1.05, 0.02, 0.35, 0xbae6fd, { size: 0.65, max: 0.8 }); }
           if (k > 0.82) { P.set('leftEar', -0.4, 0, 0); P.set('rightEar', -0.4, 0, 0); p.bob.y -= (Math.sin((k - 0.82) * 60) > 0 ? 0.04 : 0); } } },
       { name: 'tell', dur: 0.35, enter() { floatEmoji('❗', 0, 1.55, 0.2, { size: 0.26, rise: 0.15, max: 0.8, color: '#ef4444' }); triggerEmotionEmote && triggerEmotionEmote('surprised'); hitStop(0.1); },
         update(p) { P.armR(-0.1, 0.9, 0.5); P.head(-0.1); P.set('leftEar', -0.5, 0, 0); P.set('rightEar', -0.5, 0, 0); p.bob.y = -0.02; } },
       { name: 'strike', dur: 1.15, anim: 'Idle', enter() { blendRate = 22; },
         update(p, k, t) { const jerk = Math.sin(t * 30) * 0.12; P.armR(0.5 + jerk, 0.8, 0.9); P.armL(0.3 + jerk, 0.9, 0.9); P.lean(-0.28, -0.12); P.set('leftUpLeg', -0.25, 0, 0);
           p.rodAngle = -0.6 + jerk; p.pole.scale.y = 0.92 + Math.sin(t * 25) * 0.03;
-          p.bob.set(0.55 + Math.sin(t * 22) * 0.05, -0.01, 0.35 + Math.cos(t * 19) * 0.04);
+          p.bob.set(1.05 + Math.sin(t * 22) * 0.05, -0.01, 0.35 + Math.cos(t * 19) * 0.04);
           if (Math.random() < 0.3) burst(p.bob.x, 0.03, p.bob.z, 0xbae6fd, 2, 0.7, { max: 0.4 }); } },
       { name: 'catch', dur: 0.6, enter(p) { hitStop(0.09); p.fish.visible = true; p.bobber.visible = false; p.line.visible = false; p.fishFrom = p.bob.clone();
-          ring(0.55, 0.03, 0.35, 0xffffff, { size: 0.9 }); burst(0.55, 0.05, 0.35, 0x7dd3fc, 22, 1.8); floatEmoji('💦', 0.55, 0.3, 0.4, { size: 0.2 }); },
+          ring(1.05, 0.03, 0.35, 0xffffff, { size: 1.2 }); burst(1.05, 0.05, 0.35, 0x7dd3fc, 22, 1.8); floatEmoji('💦', 1.05, 0.3, 0.4, { size: 0.2 }); },
         update(p, k, t) { P.arms(1.2, 0.3, 0.3); P.lean(-0.2); const s = smooth(k);
           p.fish.position.set(lerp(p.fishFrom.x, 0, s), lerp(0.05, 1.62, s) + Math.sin(s * Math.PI) * 0.4, lerp(p.fishFrom.z, 0.15, s));
           p.fish.rotation.set(t * 15, 0, Math.sin(t * 20) * 0.5); p.rodAngle = 0.3; } },
@@ -319,6 +380,11 @@ export function createSoloPlaySubsystem(ctx) {
     frame(p) {
       handPos('R', p.hand);
       p.rod.position.copy(p.hand);
+      if (p.rod.scale.x > 0.05) p.rod.scale.setScalar(3.6);
+      if (p.pond.scale.x > 0.05) p.pond.scale.setScalar(3.5);
+      p.pond.position.set(1.05, 0.012, 0.35);
+      p.bobber.scale.setScalar(3.6);
+      p.fish.scale.setScalar(3.5);
       p.rod.rotation.set(-(p.rodAngle ?? 0.3), 0, -0.25);
       p.rod.updateMatrixWorld(true);
       p.tip.set(0, 0.9 * p.pole.scale.y, 0); p.pole.parent.localToWorld(p.tip); root.worldToLocal(p.tip);
@@ -332,6 +398,8 @@ export function createSoloPlaySubsystem(ctx) {
   // =====================================================================
   // HERO 2: CAMPING (gather logs -> friction fire -> ignite -> roast -> eat)
   // =====================================================================
+  const MALLOW_RAW_COL = new THREE.Color(0xfffbeb);
+  const MALLOW_ROAST_COL = new THREE.Color(0xb45309);
   register('camping', {
     title: '🔥 캠핑 & 마시멜로', skill: '캠핑', speech: '장작 모아서 불 피우는 중... 오늘 밤은 캠핑이에요! ⛺',
     build(g) {
@@ -358,7 +426,7 @@ export function createSoloPlaySubsystem(ctx) {
         update(p, k) { p.fire.scale.setScalar(outBack(k)); p.light.intensity = lerp(3.5, 1.6, k); P.set('hips', -0.12, 0, 0); P.head(-0.35); P.arms(0.6, 0.4); } },
       { name: 'roast', dur: 3.0, enter(p) { p.stick.visible = true; p.emberT = 0; },
         update(p, k, t, dt) { P.armR(-0.1, 1.0, 0.5); P.armL(-0.4, 0.9, 0.9); P.head(0.15, 0, Math.sin(t * 0.8) * 0.15); P.set('tailBase', 0, 0, Math.sin(t * 2) * 0.25);
-          p.mallow.material.color.lerpColors(new THREE.Color(0xfffbeb), new THREE.Color(0xb45309), smooth(k));
+          p.mallow.material.color.lerpColors(MALLOW_RAW_COL, MALLOW_ROAST_COL, smooth(k));
           if ((p.emberT -= dt) <= 0) { p.emberT = 0.12; burst(rand(-0.05, 0.05), 0.25, 0.42, pick([0xf97316, 0xfde047]), 1, 0.4, { g: 0.4, max: 1.0 }); }
           if (k > 0.85 && !p.toasty) { p.toasty = true; floatEmoji('✨', 0.2, 0.7, 0.45, { size: 0.14 }); } } },
       { name: 'eat', dur: 0.7, update(p, k) { P.armR(0.5 * smooth(k), 1.2, 1.6 * smooth(k)); P.head(lerp(0.2, -0.15, smooth(k)));
@@ -374,6 +442,11 @@ export function createSoloPlaySubsystem(ctx) {
       p.inner.scale.y = 1 + Math.sin(t * 21) * 0.2;
       if (p.light.intensity > 0.2) p.light.intensity += Math.sin(t * 29) * 0.05;
       handPos('R', p.hand); p.stick.position.copy(p.hand); p.stick.rotation.set(1.05, 0, -0.35);
+      p.stick.scale.setScalar(3.4);
+      p.fire.position.set(0.95, 0.04, 0.35);
+      p.tent.position.set(-1.15, 0.22, -0.15);
+      if (p.fire.scale.x > 0.05) p.fire.scale.setScalar(3.4);
+      if (p.tent.scale.x > 0.05) p.tent.scale.setScalar(3.2);
     },
   });
 
@@ -402,7 +475,7 @@ export function createSoloPlaySubsystem(ctx) {
       { name: 'plan', dur: 0.9, anim: 'Curious', enter() { floatEmoji('📐', -0.42, 0.6, 0.4, { size: 0.18 }); },
         update(p, k, t) { const r = Math.sin(t * 15) * 0.2; P.armR(-0.2, 1.0, 1.0 + r); P.armL(-0.2, 1.0, 1.0 - r); P.head(0.15, 0.35); } },
       { name: 'build', dur: 4.4, anim: 'Idle', enter(p) { p.hammer.visible = true; blendRate = 26; },
-        update(p, k, t) {
+        update(p, k, t, dt) {
           const beat = 1.1, i = Math.min(3, Math.floor((k * 4.4) / beat)), bt = ((k * 4.4) % beat) / beat;
           const b = p.blocks[i];
           if (bt < 0.3) { // carry & place
@@ -417,9 +490,10 @@ export function createSoloPlaySubsystem(ctx) {
             p.swing = down ? -0.4 : 1.4;
             const id = i * 10 + strike;
             if (down && p.lastStrike !== id) { p.lastStrike = id; const bx = -0.42 + b.userData.slot.x, by = b.userData.slot.y + 0.06;
-              burst(bx, by, 0.48, 0xfbbf24, 5, 1.0, { max: 0.45 }); if (strike === 2) floatEmoji('쾅!', bx, by + 0.15, 0.5, { size: 0.12, color: '#fde047', max: 0.7 }); hitStop(0.05); }
+              burst(bx, by, 0.48, 0xfbbf24, 5, 1.0, { max: 0.45 }); if (strike === 2) floatEmoji('쾅!', bx, by + 0.15, 0.5, { size: 0.14, color: '#fde047', max: 0.75 }); hitStop(0.05); }
           }
-          p.blocks.forEach((bb) => bb.scale.lerp(tmpV.set(1, 1, 1), 0.2));
+          const bLerp = 1 - Math.exp(-12 * dt);
+          p.blocks.forEach((bb) => bb.scale.lerp(tmpV.set(1, 1, 1), bLerp));
         } },
       { name: 'roof', dur: 1.0, anim: 'Jump', enter(p) { p.roof.visible = true; p.hammer.visible = false; blendRate = 14; },
         update(p, k) { const s = clamp01(k / 0.45); p.roof.position.y = s < 1 ? lerp(1.4, 0.34, s * s) : 0.34;
@@ -430,7 +504,14 @@ export function createSoloPlaySubsystem(ctx) {
       { name: 'exit', dur: 0.8, update(p, k) { p.house.scale.setScalar(Math.max(0.01, 1 - smooth(k))); if (k > 0.95) p.house.visible = false; } },
     ],
     start2(p) { p.roofed = false; p.lastStrike = -1; },
-    frame(p) { handPos('R', p.hand); p.hammer.position.copy(p.hand); p.hammer.rotation.set(0.3, 0, -0.6 - p.swing * 0.6); },
+    frame(p) {
+      handPos('R', p.hand);
+      p.hammer.position.copy(p.hand);
+      p.hammer.scale.setScalar(3.6);
+      p.house.position.set(-1.15, 0, 0.32);
+      if (p.house.scale.x > 0.05) p.house.scale.setScalar(3.3);
+      p.hammer.rotation.set(0.3, 0, -0.6 - p.swing * 0.6);
+    },
   });
 
   // =====================================================================
@@ -463,8 +544,8 @@ export function createSoloPlaySubsystem(ctx) {
         update(p, k, t, dt) { P.lean(0.22, 0.1); P.head(0.3, 0.35); P.armR(-0.2, 1.0, 0.8); P.armL(-0.2, 1.0, 0.8);
           p.stream.scale.set(1, 1 + Math.sin(t * 30) * 0.1, 1); p.coffee.position.y = lerp(-0.03, 0.028, smooth(k));
           if ((p.steamT -= dt) <= 0) { p.steamT = 0.2; puff(-0.22, 0.42, 0.51, 0xf1f5f9, 1, { grow: 1.2, max: 0.8 }); } } },
-      { name: 'latteArt', dur: 1.3, enter(p) { p.stream.visible = false; p.art.visible = true; triggerEmotionEmote && triggerEmotionEmote('focused'); },
-        update(p, k, t) { p.cup.position.lerp(tmpV.set(0, 0.36, 0.51), 0.15); P.armR(0.1, 1.0, 0.9 + Math.sin(t * 14) * 0.15); P.armL(-0.1, 1.0, 1.0); P.head(0.35, 0, 0.2);
+      { name: 'latteArt', dur: 1.3, enter(p) { p.stream.visible = false; p.art.visible = true; triggerEmotionEmote && triggerEmotionEmote('curious'); },
+        update(p, k, t, dt) { p.cup.position.lerp(tmpV.set(0, 0.36, 0.51), 1 - Math.exp(-10 * dt)); P.armR(0.1, 1.0, 0.9 + Math.sin(t * 14) * 0.15); P.armL(-0.1, 1.0, 1.0); P.head(0.35, 0, 0.2);
           const s = outBack(k); p.art.scale.copy(p.art.userData.baseScale).multiplyScalar(Math.max(0.01, s)); } },
       { name: 'present', dur: 1.7, anim: 'Idle', enter() { grantReward(S, '☕', pick(['하트 라떼', '로제타 라떼', '백조 라떼아트']), 25); },
         update(p, k, t) { const s = smooth(clamp01(k / 0.4)); p.cup.position.set(0, lerp(0.36, 0.7, s), lerp(0.51, 0.6, s)); P.arms(0.0, 1.3, 1.0); P.head(k > 0.6 ? 0.25 : -0.1);
@@ -473,6 +554,9 @@ export function createSoloPlaySubsystem(ctx) {
       { name: 'exit', dur: 0.7, update(p, k, t) { P.armL(-0.2, 0.9, 0.5 + Math.sin(t * 9) * 0.3); p.all.forEach((o) => o.scale.setScalar(Math.max(0.01, 1 - smooth(k)))); } },
     ],
     start2(p) { p.star0 = p.star1 = p.star2 = false; },
+    frame(p) {
+      p.all.forEach((o) => { if (o !== p.stream && o.scale.x > 0.05) o.scale.setScalar(2.05); });
+    },
   });
 
   // =====================================================================
@@ -514,7 +598,8 @@ export function createSoloPlaySubsystem(ctx) {
     frame(p) {
       handPos('L', p.hand);
       const ud = p.gtr.userData;
-      p.gtr.position.set(0.06, 0.62, 0.3);
+      if (p.gtr.scale.x > 0.05) p.gtr.scale.setScalar(2.25);
+      p.gtr.position.set(0.08, 0.62, 0.34);
       p.gtr.rotation.set(0.15, ud.spin || 0, -0.95 + (ud.tilt || 0));
     },
   });
@@ -669,7 +754,7 @@ export function createSoloPlaySubsystem(ctx) {
           }
         }
       },
-      { name: 'shatter', dur: 0.65, anim: 'Jump',
+      { name: 'shatter', dur: 0.65, anim: 'Proud',
         enter(p) {
           hitStop(0.11);
           ring(0.36, 0.04, 0.38, 0xfacc15, { size: 1.65, max: 0.55 });
@@ -678,19 +763,19 @@ export function createSoloPlaySubsystem(ctx) {
           p.vein.scale.setScalar(0.01);
         },
         update(p, k) {
-          P.arms(2.1, 0.3, 0.4);
+          P.arms(1.8, 0.3, 0.4);
           p.swing = -0.3;
           p.vein.scale.setScalar(Math.max(0.01, 1 - smooth(k * 2)));
         }
       },
-      { name: 'reward', dur: 1.35, anim: 'WaveJump',
+      { name: 'reward', dur: 1.35, anim: 'Proud',
         enter(p) {
           grantReward(S, p.oreEntry[0], p.oreEntry[1], 35, { category: 'mining' });
         },
         update(p) {
           p.pickaxe.visible = false;
-          P.arms(2.2, 0.2, 0.3);
-          P.head(-0.2);
+          P.arms(1.9, 0.2, 0.3);
+          P.head(-0.15);
         }
       },
       { name: 'restore', dur: 0.65, anim: 'Idle',
@@ -710,6 +795,9 @@ export function createSoloPlaySubsystem(ctx) {
     frame(p) {
       handPos('R', p.hand);
       p.pickaxe.position.copy(p.hand);
+      if (p.pickaxe.visible) p.pickaxe.scale.setScalar(3.6);
+      p.site.position.set(1.05, 0.008, 0.35);
+      p.site.scale.setScalar(3.5);
       p.pickaxe.rotation.set(0.25, 0, -0.55 - p.swing * 0.65);
     }
   });
@@ -728,8 +816,8 @@ export function createSoloPlaySubsystem(ctx) {
           P.armR(down ? -0.1 : 1.3, 0.9, down ? 0.5 : 1.3); P.armL(-0.3, 0.9, 0.7); P.lean(down ? 0.2 : 0, down ? 0.1 : 0); P.head(0.25);
           const id = Math.floor(t * 1.6); if (down && p.__beat !== id) { p.__beat = id; burst(c.at[0], c.at[1], c.at[2], c.fxColor, 5, 0.9, { max: 0.5 }); if (c.beatEmoji) floatEmoji(c.beatEmoji, c.at[0], c.at[1] + 0.12, c.at[2], { size: 0.11, max: 0.8 }); }
           c.work && c.work(p, k, t); } },
-      { name: 'climax', dur: 0.9, anim: 'Jump', enter(p) { hitStop(0.08); ring(c.at[0], 0.04, c.at[2], c.ringColor || 0xfacc15, { size: 1.2 }); burst(c.at[0], c.at[1] + 0.2, c.at[2], 0xf472b6, 22, 1.5); c.climax && c.climax(p); },
-        update(p, k) { P.arms(2.0, 0.3); c.pulse && c.pulse(p, k); } },
+      { name: 'climax', dur: 0.9, anim: 'Proud', enter(p) { hitStop(0.08); ring(c.at[0], 0.04, c.at[2], c.ringColor || 0xfacc15, { size: 1.2 }); burst(c.at[0], c.at[1] + 0.2, c.at[2], 0xf472b6, 22, 1.5); c.climax && c.climax(p); },
+        update(p, k) { P.arms(1.8, 0.3); c.pulse && c.pulse(p, k); } },
       ...tail(c),
     ],
     B: (c) => [
@@ -783,7 +871,11 @@ export function createSoloPlaySubsystem(ctx) {
   }
   function simple(key, cfg) {
     const c = { fxColor: 0xfde047, at: [0, 0.4, 0.4], ...cfg };
-    c.show = (p, s) => { p.__root.scale.setScalar(Math.max(0.01, s)); };
+    c.show = (p, s) => {
+      const sc = Math.max(0.10, stageGroup.scale.x);
+      const propBoost = sc <= 0.16 ? 3.2 : (sc <= 0.35 ? 2.1 : 1.45);
+      p.__root.scale.setScalar(Math.max(0.01, s * propBoost));
+    };
     register(key, {
       title: cfg.title, skill: cfg.skill, speech: cfg.speech,
       build(g) { const r = new THREE.Group(); g.add(r); const p = cfg.build ? cfg.build(r) : {}; p.__root = r; if (p.held) { r.remove(p.held); g.add(p.held); } return p; },
@@ -891,12 +983,23 @@ export function createSoloPlaySubsystem(ctx) {
     return { title: def.title, speech: def.speech, duration: def.total };
   }
   function updateSoloPlay(dt) {
+    textFxGroup.position.copy(stageGroup.position);
+    textFxGroup.visible = root.visible;
     updateFx(dt);
     if (!S.active) { if (S.weight > 0.001) { S.weight = Math.max(0, S.weight - dt * 4); P.reset(); applyPose(dt, S.weight); } return; }
     const def = S.def, p = S.p;
     S.weight = Math.min(1, S.weight + dt * 5);
     if (S.hitStop > 0) { S.hitStop -= dt; } else { S.t += dt * (S.speed || 1); }
-    if (S.t >= def.total) { stopSoloAction(); S.weight = 1; playAnimation && playAnimation('Idle'); return; }
+    if (S.t >= def.total) {
+      const finishedKey = S.key;
+      stopSoloAction();
+      S.weight = 1;
+      playAnimation && playAnimation('Idle');
+      if (typeof window.emitPpongSync === 'function') {
+        window.emitPpongSync({ type: 'solo_completed', action: finishedKey });
+      }
+      return;
+    }
     let idx = def.bounds.findIndex(([a, b]) => S.t >= a && S.t < b); if (idx < 0) idx = def.phases.length - 1;
     const ph = def.phases[idx];
     if (idx !== S.idx) { S.idx = idx; if (ph.anim && playAnimation) playAnimation(ph.anim); if (ph.emote && triggerEmotionEmote) triggerEmotionEmote(ph.emote); ph.enter && ph.enter(p); }
@@ -904,6 +1007,11 @@ export function createSoloPlaySubsystem(ctx) {
     const k = (S.t - a) / (b - a);
     P.reset();
     ph.update && ph.update(p, k, S.t, dt);
+    if (ph.name === 'exit' || ph.name === 'restore') {
+      const decay = Math.exp(-10 * dt);
+      characterPivot.position.x *= decay;
+      characterPivot.position.y *= decay;
+    }
     applyPose(dt, S.weight);
     def.frame && def.frame(p, S.t);
   }

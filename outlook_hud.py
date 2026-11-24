@@ -18,7 +18,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any, List, Optional
 
-from PyQt6.QtCore import QPoint, QRect, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QRect, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPen
 from PyQt6.QtWidgets import (
     QApplication,
@@ -96,8 +96,8 @@ class AvatarWidget(QFrame):
         p.drawEllipse(1, 1, self.avatar_size - 2, self.avatar_size - 2)
 
         p.setPen(QColor(fg_hex))
-        font_sz = max(9, int(self.avatar_size * 0.36))
-        p.setFont(QFont("Malgun Gothic", font_sz, QFont.Weight.Bold))
+        font_sz = max(10, int(self.avatar_size * 0.36))
+        p.setFont(QFont("Pretendard", font_sz, QFont.Weight.Bold))
         initials = get_sender_initials(self.sender_name)
         p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, initials)
         p.end()
@@ -135,38 +135,38 @@ class EmailCardWidget(QFrame):
         top_row.setSpacing(6)
 
         self.lbl_sender = QLabel(self.item.sender_name, self)
-        f_sender = QFont("Malgun Gothic", 10, QFont.Weight.Bold if self.item.is_unread else QFont.Weight.DemiBold)
+        f_sender = QFont("Pretendard", 11, QFont.Weight.Bold if self.item.is_unread else QFont.Weight.DemiBold)
         self.lbl_sender.setFont(f_sender)
         self.lbl_sender.setStyleSheet(f"color: {COLOR_TEXT_MAIN}; background: transparent;")
         top_row.addWidget(self.lbl_sender, stretch=1)
 
         if self.item.urgency_level == "urgent":
             lbl_urg = QLabel("긴급", self)
-            lbl_urg.setStyleSheet("background-color: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 4px; padding: 1px 5px; font-size: 10px; font-weight: bold;")
+            lbl_urg.setStyleSheet("background-color: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 4px; padding: 2px 6px; font-size: 12px; font-weight: bold;")
             top_row.addWidget(lbl_urg)
 
         if self.item.extracted_meeting:
             lbl_meet = QLabel("회의", self)
-            lbl_meet.setStyleSheet("background-color: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 4px; padding: 1px 5px; font-size: 10px; font-weight: bold;")
+            lbl_meet.setStyleSheet("background-color: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 4px; padding: 2px 6px; font-size: 12px; font-weight: bold;")
             top_row.addWidget(lbl_meet)
 
         # Time
         time_part = self.item.received_time.split(" ")[-1] if " " in self.item.received_time else self.item.received_time
         self.lbl_time = QLabel(time_part, self)
-        self.lbl_time.setStyleSheet(f"color: {COLOR_TEXT_SUBTLE}; font-size: 10px; background: transparent;")
+        self.lbl_time.setStyleSheet(f"color: {COLOR_TEXT_SUBTLE}; font-size: 12px; background: transparent;")
         top_row.addWidget(self.lbl_time)
 
         # Unread dot
         if self.item.is_unread:
             dot = QLabel("●", self)
-            dot.setStyleSheet(f"color: {COLOR_ACCENT}; font-size: 8px; margin-left: 2px;")
+            dot.setStyleSheet(f"color: {COLOR_ACCENT}; font-size: 10px; margin-left: 2px;")
             top_row.addWidget(dot)
 
         content_vbox.addLayout(top_row)
 
         # Row 2: Subject Line
         self.lbl_subject = QLabel(self.item.subject, self)
-        f_sub = QFont("Malgun Gothic", 9, QFont.Weight.Medium if self.item.is_unread else QFont.Weight.Normal)
+        f_sub = QFont("Pretendard", 11, QFont.Weight.Medium if self.item.is_unread else QFont.Weight.Normal)
         self.lbl_subject.setFont(f_sub)
         self.lbl_subject.setWordWrap(False)
         self.lbl_subject.setStyleSheet(f"color: {COLOR_TEXT_MAIN if self.item.is_unread else COLOR_TEXT_MUTED}; background: transparent;")
@@ -175,7 +175,7 @@ class EmailCardWidget(QFrame):
         # Row 3: Preview Snippet
         snippet = self.item.body.strip().replace("\n", " ")[:60] + ("..." if len(self.item.body) > 60 else "")
         self.lbl_preview = QLabel(snippet, self)
-        self.lbl_preview.setStyleSheet(f"color: {COLOR_TEXT_SUBTLE}; font-size: 10px; background: transparent;")
+        self.lbl_preview.setStyleSheet(f"color: {COLOR_TEXT_SUBTLE}; font-size: 13px; background: transparent;")
         content_vbox.addWidget(self.lbl_preview)
 
         main_layout.addLayout(content_vbox, stretch=1)
@@ -243,7 +243,8 @@ class OutlookHUDDrawer(QWidget):
             self._current_items = list(self.service.cached_items)
             self._apply_filters()
 
-        self.service.refresh_inbox()
+        # Defer Outlook COM inbox refresh so 3D character renders without COM thread contention
+        QTimer.singleShot(3500, self.service.refresh_inbox)
 
     def _init_window(self) -> None:
         self.setWindowFlags(
@@ -252,7 +253,7 @@ class OutlookHUDDrawer(QWidget):
             | Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.resize(840, 620)
+        self.resize(1100, 760)
         self.setWindowTitle("Outlook AI Mail Hub - Executive Edition")
 
     def _init_ui(self) -> None:
@@ -264,47 +265,49 @@ class OutlookHUDDrawer(QWidget):
         self.main_container.setStyleSheet(
             f"""
             QFrame#MainContainer {{
-                background-color: {COLOR_BG_DEEP};
-                border: 1.5px solid rgba(148, 163, 184, 0.22);
-                border-radius: 16px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0b1328, stop:1 #030712);
+                border: 2px solid #fbbf24;
+                border-radius: 18px;
             }}
             QLabel {{
                 color: {COLOR_TEXT_MAIN};
-                font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;
+                font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
+                font-size: 16px;
             }}
             QLineEdit {{
                 background-color: {COLOR_SURFACE};
                 color: {COLOR_TEXT_MAIN};
-                border: 1px solid {COLOR_BORDER};
-                border-radius: 8px;
-                padding: 7px 11px;
-                font-size: 12px;
-                font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;
+                border: 1.5px solid {COLOR_BORDER};
+                border-radius: 10px;
+                padding: 10px 14px;
+                font-size: 18px;
+                font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
             }}
             QLineEdit:focus {{
-                border: 1.5px solid {COLOR_ACCENT};
+                border: 2px solid {COLOR_ACCENT};
                 background-color: #0b1120;
             }}
             QPushButton {{
-                font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;
+                font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
+                font-size: 16px;
             }}
             """
         )
 
         c_layout = QVBoxLayout(self.main_container)
-        c_layout.setContentsMargins(14, 12, 14, 14)
-        c_layout.setSpacing(10)
+        c_layout.setContentsMargins(18, 16, 18, 18)
+        c_layout.setSpacing(12)
 
         # 1. Header Bar (Draggable)
         header = QHBoxLayout()
-        header.setSpacing(8)
+        header.setSpacing(10)
 
         lbl_logo = QLabel("📬 Microsoft Outlook AI Executive Hub", self.main_container)
-        lbl_logo.setFont(QFont("Malgun Gothic", 12, QFont.Weight.Bold))
+        lbl_logo.setStyleSheet("color: #fde047; font-size: 22px; font-weight: 900;")
         header.addWidget(lbl_logo)
 
         self.lbl_status = QLabel("● 동기화 완료", self.main_container)
-        self.lbl_status.setStyleSheet("color: #34d399; font-size: 11px; font-weight: bold;")
+        self.lbl_status.setStyleSheet("color: #34d399; font-size: 16px; font-weight: bold;")
         header.addWidget(self.lbl_status, stretch=1)
 
         btn_sync = QPushButton("🔄 메일함 새로고침", self.main_container)
@@ -314,15 +317,15 @@ class OutlookHUDDrawer(QWidget):
             QPushButton {{
                 background-color: {COLOR_SURFACE};
                 color: {COLOR_TEXT_MAIN};
-                border: 1px solid {COLOR_BORDER};
-                border-radius: 8px;
-                padding: 5px 12px;
-                font-size: 11px;
-                font-weight: 600;
+                border: 1.5px solid {COLOR_BORDER};
+                border-radius: 10px;
+                padding: 8px 16px;
+                font-size: 16px;
+                font-weight: 700;
             }}
             QPushButton:hover {{
                 background-color: #1e293b;
-                border-color: {COLOR_ACCENT};
+                border-color: #fde047;
             }}
             """
         )
@@ -331,18 +334,20 @@ class OutlookHUDDrawer(QWidget):
 
         btn_close = QPushButton("✕", self.main_container)
         btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_close.setFixedSize(28, 28)
+        btn_close.setFixedSize(40, 40)
         btn_close.setStyleSheet(
             """
             QPushButton {
-                background: transparent;
-                border: none;
-                color: #94a3b8;
-                font-size: 14px;
+                background: rgba(239,68,68,0.22);
+                border: 1.5px solid rgba(239,68,68,0.55);
+                border-radius: 20px;
+                color: #fca5a5;
+                font-size: 19px;
                 font-weight: bold;
             }
             QPushButton:hover {
-                color: #ef4444;
+                background: #dc2626;
+                color: #ffffff;
             }
             """
         )
@@ -457,11 +462,11 @@ class OutlookHUDDrawer(QWidget):
         meta_vbox.setSpacing(2)
 
         self.lbl_detail_sender = QLabel("메일을 선택해주세요", self.detail_header_frame)
-        self.lbl_detail_sender.setFont(QFont("Malgun Gothic", 11, QFont.Weight.Bold))
+        self.lbl_detail_sender.setFont(QFont("Pretendard", 13, QFont.Weight.Bold))
         meta_vbox.addWidget(self.lbl_detail_sender)
 
         self.lbl_detail_subject = QLabel("선택된 메일의 제목이 여기에 표시됩니다.", self.detail_header_frame)
-        self.lbl_detail_subject.setFont(QFont("Malgun Gothic", 10, QFont.Weight.Medium))
+        self.lbl_detail_subject.setFont(QFont("Pretendard", 11, QFont.Weight.Medium))
         self.lbl_detail_subject.setWordWrap(True)
         self.lbl_detail_subject.setStyleSheet(f"color: {COLOR_TEXT_MUTED};")
         meta_vbox.addWidget(self.lbl_detail_subject)
@@ -481,8 +486,8 @@ class OutlookHUDDrawer(QWidget):
                 color: #ffffff;
                 border: none;
                 border-radius: 6px;
-                padding: 5px 10px;
-                font-size: 11px;
+                padding: 6px 12px;
+                font-size: 14px;
                 font-weight: 600;
             }}
             QPushButton:hover {{
@@ -502,8 +507,8 @@ class OutlookHUDDrawer(QWidget):
                 color: {COLOR_TEXT_MAIN};
                 border: 1px solid {COLOR_BORDER};
                 border-radius: 6px;
-                padding: 4px 8px;
-                font-size: 10px;
+                padding: 5px 10px;
+                font-size: 13px;
                 font-weight: 500;
             }}
             QPushButton:hover {{
@@ -564,18 +569,18 @@ class OutlookHUDDrawer(QWidget):
         briefing_vbox.setSpacing(6)
 
         lbl_b_title = QLabel("⚡ 핵심 브리핑 요약 (Executive Summary)", self.card_briefing)
-        lbl_b_title.setFont(QFont("Malgun Gothic", 10, QFont.Weight.Bold))
+        lbl_b_title.setFont(QFont("Pretendard", 12, QFont.Weight.Bold))
         lbl_b_title.setStyleSheet(f"color: {COLOR_ACCENT};")
         briefing_vbox.addWidget(lbl_b_title)
 
         self.lbl_briefing_body = QLabel("좌측 목록에서 메일을 선택하면 AI가 핵심 요점과 조치 사항을 정리합니다.", self.card_briefing)
         self.lbl_briefing_body.setWordWrap(True)
-        self.lbl_briefing_body.setStyleSheet("color: #e2e8f0; font-size: 11px; line-height: 150%;")
+        self.lbl_briefing_body.setStyleSheet("color: #e2e8f0; font-size: 14px; line-height: 155%;")
         briefing_vbox.addWidget(self.lbl_briefing_body)
 
         # Action Items Checklist
         self.lbl_actions_title = QLabel("📌 실행 과제 (Action Items Checklist)", self.card_briefing)
-        self.lbl_actions_title.setFont(QFont("Malgun Gothic", 9, QFont.Weight.Bold))
+        self.lbl_actions_title.setFont(QFont("Pretendard", 11, QFont.Weight.Bold))
         self.lbl_actions_title.setStyleSheet("color: #cbd5e1; margin-top: 4px;")
         briefing_vbox.addWidget(self.lbl_actions_title)
 
@@ -604,7 +609,7 @@ class OutlookHUDDrawer(QWidget):
         meet_layout.setSpacing(10)
 
         self.lbl_meet_info = QLabel("📅 감지된 회의 일정 정보", self.box_meeting)
-        self.lbl_meet_info.setStyleSheet("color: #a7f3d0; font-size: 11px; font-weight: bold;")
+        self.lbl_meet_info.setStyleSheet("color: #a7f3d0; font-size: 14px; font-weight: bold;")
         meet_layout.addWidget(self.lbl_meet_info, stretch=1)
 
         self.btn_calendar_reg = QPushButton("📅 Outlook 캘린더 자동 등록", self.box_meeting)
@@ -616,8 +621,8 @@ class OutlookHUDDrawer(QWidget):
                 color: #ffffff;
                 border: none;
                 border-radius: 6px;
-                padding: 6px 12px;
-                font-size: 11px;
+                padding: 7px 14px;
+                font-size: 14px;
                 font-weight: bold;
             }}
             QPushButton:hover {{
@@ -648,7 +653,7 @@ class OutlookHUDDrawer(QWidget):
         reply_vbox.setSpacing(6)
 
         lbl_r_title = QLabel("✍️ AI 스마트 회신 초안 생성 (Quick Response)", box_reply)
-        lbl_r_title.setFont(QFont("Malgun Gothic", 10, QFont.Weight.Bold))
+        lbl_r_title.setFont(QFont("Pretendard", 12, QFont.Weight.Bold))
         lbl_r_title.setStyleSheet("color: #cbd5e1;")
         reply_vbox.addWidget(lbl_r_title)
 
@@ -664,8 +669,8 @@ class OutlookHUDDrawer(QWidget):
                     color: #cbd5e1;
                     border: 1px solid rgba(148, 163, 184, 0.2);
                     border-radius: 6px;
-                    padding: 4px 8px;
-                    font-size: 11px;
+                    padding: 5px 10px;
+                    font-size: 14px;
                 }
                 QPushButton:hover {
                     background-color: #2563eb;
@@ -689,9 +694,9 @@ class OutlookHUDDrawer(QWidget):
                 color: #e2e8f0;
                 border: 1px solid {COLOR_BORDER};
                 border-radius: 6px;
-                padding: 6px;
-                font-size: 11px;
-                font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;
+                padding: 8px;
+                font-size: 14px;
+                font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
             }}
             """
         )
@@ -709,8 +714,8 @@ class OutlookHUDDrawer(QWidget):
                 color: {COLOR_TEXT_MAIN};
                 border: 1px solid {COLOR_BORDER};
                 border-radius: 6px;
-                padding: 4px 10px;
-                font-size: 11px;
+                padding: 5px 12px;
+                font-size: 14px;
             }}
             QPushButton:hover {{
                 border-color: {COLOR_ACCENT};
@@ -729,8 +734,8 @@ class OutlookHUDDrawer(QWidget):
                 color: #ffffff;
                 border: none;
                 border-radius: 6px;
-                padding: 4px 12px;
-                font-size: 11px;
+                padding: 5px 14px;
+                font-size: 14px;
                 font-weight: 600;
             }}
             QPushButton:hover {{
@@ -761,9 +766,9 @@ class OutlookHUDDrawer(QWidget):
                 border: 1px solid {COLOR_BORDER};
                 border-radius: 10px;
                 padding: 14px;
-                font-size: 12px;
+                font-size: 15px;
                 line-height: 160%;
-                font-family: 'Malgun Gothic', 'Segoe UI', sans-serif;
+                font-family: 'Pretendard', 'Malgun Gothic', 'Segoe UI', sans-serif;
             }}
             """
         )
@@ -794,8 +799,8 @@ class OutlookHUDDrawer(QWidget):
                     color: #ffffff;
                     border: 1px solid {COLOR_ACCENT};
                     border-radius: 12px;
-                    padding: 4px 10px;
-                    font-size: 11px;
+                    padding: 5px 12px;
+                    font-size: 14px;
                     font-weight: bold;
                 }}
                 """
@@ -808,8 +813,8 @@ class OutlookHUDDrawer(QWidget):
                     color: #94a3b8;
                     border: 1px solid rgba(148, 163, 184, 0.18);
                     border-radius: 12px;
-                    padding: 4px 10px;
-                    font-size: 11px;
+                    padding: 5px 12px;
+                    font-size: 14px;
                 }}
                 QPushButton:hover {{
                     background-color: #1e293b;
@@ -827,8 +832,8 @@ class OutlookHUDDrawer(QWidget):
                     color: {COLOR_ACCENT};
                     border: 1px solid rgba(56, 189, 248, 0.35);
                     border-radius: 8px;
-                    padding: 5px 12px;
-                    font-size: 11px;
+                    padding: 6px 14px;
+                    font-size: 14px;
                     font-weight: bold;
                 }}
                 """
@@ -841,8 +846,8 @@ class OutlookHUDDrawer(QWidget):
                     color: #94a3b8;
                     border: 1px solid transparent;
                     border-radius: 8px;
-                    padding: 5px 12px;
-                    font-size: 11px;
+                    padding: 6px 14px;
+                    font-size: 14px;
                 }
                 QPushButton:hover {
                     background-color: rgba(30, 41, 59, 0.5);
@@ -869,7 +874,7 @@ class OutlookHUDDrawer(QWidget):
     def _on_calendar_registered(self, item_id: str, message: str) -> None:
         self.btn_calendar_reg.setText("✓ 등록 완료!")
         self.btn_calendar_reg.setEnabled(False)
-        self.btn_calendar_reg.setStyleSheet("background-color: #047857; color: #ffffff; border-radius: 6px; padding: 6px 12px; font-size: 11px;")
+        self.btn_calendar_reg.setStyleSheet("background-color: #047857; color: #ffffff; border-radius: 6px; padding: 6px 12px; font-size: 14px;")
 
     def _set_filter_tab(self, tab_id: str) -> None:
         self._filter_tab = tab_id
@@ -945,7 +950,7 @@ class OutlookHUDDrawer(QWidget):
             self.lbl_actions_title.show()
             for act in item.ai_action_items:
                 chk = QCheckBox(act, self.actions_container)
-                chk.setStyleSheet("QCheckBox { color: #cbd5e1; font-size: 11px; } QCheckBox::indicator:checked { background: #38bdf8; }")
+                chk.setStyleSheet("QCheckBox { color: #cbd5e1; font-size: 14px; } QCheckBox::indicator:checked { background: #38bdf8; }")
                 self.actions_layout.addWidget(chk)
         else:
             self.lbl_actions_title.hide()
@@ -994,7 +999,7 @@ class OutlookHUDDrawer(QWidget):
         if success:
             self.btn_calendar_reg.setText("✓ 등록 완료!")
             self.btn_calendar_reg.setEnabled(False)
-            self.btn_calendar_reg.setStyleSheet("background-color: #047857; color: #ffffff; border-radius: 6px; padding: 6px 12px; font-size: 11px;")
+            self.btn_calendar_reg.setStyleSheet("background-color: #047857; color: #ffffff; border-radius: 6px; padding: 6px 12px; font-size: 14px;")
 
     def _generate_reply_draft(self, tone: str) -> None:
         if not self._selected_item:
